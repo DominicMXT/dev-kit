@@ -1,0 +1,109 @@
+@~/Work/dev-kit/standards/python-backend.md
+@backend/devtools/CLAUDE.md
+@backend/devtools/user_role.md
+
+# {{ project_name }}
+
+{{ description }}
+
+## ТЗ и материалы
+
+Заполняется при старте проекта: где лежит ТЗ, из каких файлов состоит, что в нём главное для кода.
+
+## Структура
+- `backend/` — Python бэкенд
+  - `app/<feature>/` — вертикальные слайсы фич: `<feature>_handler.py` + `schemas/` + `services/`; друг друга не импортируют
+  - `app/dependencies.py`, `app/constants.py`, `app/schemas/`, `app/services/`, `app/utils/` — общее для нескольких фич
+  - `app/database/` — ORM модели и инициализация Tortoise ORM
+    - `app/database/models/` — Tortoise ORM модели
+    - `app/database/enums/` — перечисления
+    - `app/database/initialization.py` — init_db, close_db, TORTOISE_ORM
+{%- if use_redis %}
+  - `app/redis/` — операции с Redis
+{%- endif %}
+{%- if use_worker %}
+  - `app/tasks/` — очередь фоновых задач Taskiq: брокер `app/tasks/broker.py` и задачи
+{%- endif %}
+  - `app/config.py` — Pydantic Settings из .env
+  - `app/main.py` — точка входа FastAPI
+  - `migrations/` — миграции Aerich
+  - `tests/` — тесты: `unit/`, `integration/`, `live/` (живые прогоны, по умолчанию отключены);
+    `conftest.py` — хук русских имён тестов и общие фикстуры
+  - `.env.example` — шаблон переменных окружения
+  - `devtools/CLAUDE.md` — правила этого проекта
+  - `devtools/user_role.md` — роль и контекст пользователя
+- `docker/` — compose-файлы и Dockerfile; контекст сборки — `backend/`, там же `.dockerignore`
+  - `docker-compose.yml` — dev: postgres{% if use_redis %} + redis{% endif %} + backend{% if use_worker %} + worker{% endif %} (`Dockerfile.dev`, автоперезапуск uvicorn)
+  - `docker-compose.prod.yml` — prod: postgres{% if use_redis %} + redis{% endif %} + backend{% if use_worker %} + worker{% endif %} (`Dockerfile`)
+  - `docker-compose.test.yml` — тесты: postgres_test{% if use_redis %} + redis_test{% endif %} + backend_test (`Dockerfile.test`)
+- `docs/` — ТЗ и материалы
+- `start.sh` — сборка без кеша и запуск dev-стека
+- `run_tests.sh` — тесты в Docker с отчётом
+- `lint.sh` — линт и форматирование
+
+## Стек
+- Python 3.12+
+- FastAPI + Uvicorn
+- Pydantic v2 + Pydantic Settings
+- Tortoise ORM + Aerich (миграции)
+- PostgreSQL 18
+{%- if use_redis %}
+- Redis 7{% if use_worker %} (брокер очереди Taskiq){% endif %}
+{%- endif %}
+{%- if use_worker %}
+- Taskiq (очередь фоновых задач)
+{%- endif %}
+- pytest + pytest-asyncio + pytest-cov
+- ruff (линт и формат)
+- Docker Compose
+
+## Env-переменные
+Шаблон — `backend/.env.example`. Секреты — только в `backend/.env` (в git не попадает).
+- `POSTGRES_HOST/PORT/DB/USER/PASSWORD` — PostgreSQL
+{%- if use_redis %}
+- `REDIS_HOST/PORT/PASSWORD` — Redis
+{%- endif %}
+- `CORS_ORIGINS/CREDENTIALS/METHODS/HEADERS` — CORS; в prod — только свой домен
+- `RUN_MODE` — `dev` / `prod` / `test`
+- `DOCS_USERNAME/PASSWORD` — Basic Auth для `/docs` в prod
+
+## Запуск
+```bash
+./start.sh
+```
+Собирает образы без кеша, пересоздаёт контейнеры и применяет миграции, если они уже есть;
+при первом запуске создаёт `backend/.env` из `backend/.env.example`.
+API — http://127.0.0.1:8000, документация — http://127.0.0.1:8000/docs.
+
+Прод (переменные для compose берутся из того же `backend/.env`):
+```bash
+docker compose --env-file backend/.env -f docker/docker-compose.prod.yml up -d --build
+```
+
+## Миграции
+```bash
+docker compose -f docker/docker-compose.yml exec backend aerich init-db
+docker compose -f docker/docker-compose.yml exec backend aerich migrate --name <название>
+docker compose -f docker/docker-compose.yml exec backend aerich upgrade
+```
+Новый модуль моделей добавляется в `TORTOISE_ORM` (`app/database/initialization.py`).
+
+## Тестирование
+```bash
+./run_tests.sh
+```
+Поднимает `docker/docker-compose.test.yml` (postgres_test{% if use_redis %} + redis_test{% endif %} + backend_test), гоняет `pytest` с coverage, затем всё сносит (`down -v`).
+В конце спрашивает, сохранить ли отчёт; без терминала — `echo n | ./run_tests.sh`.
+
+Живые прогоны против настоящих внешних API (в обычный прогон не входят), ключи берутся из `backend/.env`:
+```bash
+docker compose --env-file backend/.env -f docker/docker-compose.test.yml \
+  run --rm backend_test pytest -m live -v tests/live
+docker compose -f docker/docker-compose.test.yml down -v
+```
+
+## Линт
+```bash
+./lint.sh
+```
+`ruff check --select I --fix` → `ruff check` → `ruff format` по `backend/`. Если ruff нет на PATH, скрипт запускает образ `ghcr.io/astral-sh/ruff:0.15.11`.

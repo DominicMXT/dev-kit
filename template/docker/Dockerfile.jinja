@@ -1,0 +1,23 @@
+# ===========================================================================
+#  BACKEND (prod) — образ API{% if use_worker %} и воркера очереди{% endif %}
+# ===========================================================================
+{%- if use_worker %}
+# Один образ для двух ролей: api (uvicorn) и worker (taskiq).
+# Команда роли задаётся в docker-compose.
+{%- endif %}
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN python -m pip install --no-cache-dir --upgrade pip
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app/ ./app/
+COPY pyproject.toml .
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

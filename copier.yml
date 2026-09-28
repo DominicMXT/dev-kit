@@ -1,0 +1,29 @@
+_subdirectory: template
+_min_copier_version: "9.0.0"
+
+project_name:
+  type: str
+  help: Название проекта, как в заголовках (например, Order Service)
+  validator: "{% if not project_name.strip() %}Название обязательно{% endif %}"
+
+project_slug:
+  type: str
+  help: Имя для контейнеров, базы и пакетов — латиница в snake_case
+  default: "{{ project_name | lower | trim | replace(' ', '_') | replace('-', '_') }}"
+  validator: "{% if not (project_slug | regex_search('^[a-z][a-z0-9_]*$')) %}Только латиница, цифры и _, первая — буква{% endif %}"
+
+description:
+  type: str
+  help: Одна строка — что это за сервис
+  default: Бэкенд-сервис на FastAPI.
+
+use_redis:
+  type: bool
+  help: Нужен Redis (кеш или брокер очереди)?
+  default: false
+
+use_worker:
+  type: bool
+  help: Нужен воркер фоновых задач (Taskiq поверх Redis)?
+  default: false
+  when: "{{ use_redis }}"

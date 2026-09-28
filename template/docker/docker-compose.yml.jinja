@@ -1,0 +1,93 @@
+name: {{ project_slug | replace('_', '-') }}
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: {{ project_slug }}_postgres
+    environment:
+      POSTGRES_USER: {{ project_slug }}
+      POSTGRES_PASSWORD: {{ project_slug }}
+      POSTGRES_DB: {{ project_slug }}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U {{ project_slug }} -d {{ project_slug }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+{%- if use_redis %}
+
+  redis:
+    image: redis:7-alpine
+    container_name: {{ project_slug }}_redis
+    command: redis-server --protected-mode no --appendonly yes --appendfsync everysec
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+{%- endif %}
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.dev
+    container_name: {{ project_slug }}_backend
+    env_file: ../backend/.env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+{%- if use_redis %}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+{%- endif %}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+{%- if use_redis %}
+      redis:
+        condition: service_healthy
+{%- endif %}
+    volumes:
+      - ../backend/app:/app/app
+      - ../backend/migrations:/app/migrations
+    restart: unless-stopped
+{%- if use_worker %}
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.dev
+    command: ["taskiq", "worker", "app.tasks.broker:broker"]
+    env_file: ../backend/.env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../backend/app:/app/app
+      - ../backend/migrations:/app/migrations
+    restart: unless-stopped
+{%- endif %}
+
+volumes:
+  postgres_data:
+{%- if use_redis %}
+  redis_data:
+{%- endif %}

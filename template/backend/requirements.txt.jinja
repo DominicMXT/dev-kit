@@ -1,0 +1,16 @@
+pydantic==2.12.5
+pydantic-settings==2.13.1
+httpx==0.28.1
+{%- if use_redis %}
+redis==8.1.0
+{%- endif %}
+{%- if use_worker %}
+taskiq==0.12.6
+taskiq-redis==1.2.3
+{%- endif %}
+tortoise-orm[asyncpg]==0.25.4
+aerich==0.9.2
+tomlkit==0.13.2
+asyncpg==0.31.0
+uvicorn==0.42.0
+fastapi==0.115.12

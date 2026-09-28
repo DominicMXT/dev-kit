@@ -1,0 +1,40 @@
+[project]
+name = "{{ project_slug | replace('_', '-') }}-backend"
+version = "0.1.0"
+description = "{{ project_name }} backend API"
+requires-python = ">=3.12"
+
+[tool.aerich]
+tortoise_orm = "app.database.initialization.TORTOISE_ORM"
+location = "./migrations"
+src_folder = "."
+
+[tool.ruff]
+line-length = 150
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "RUF", "T201", "PLC0415"]
+ignore = ["E501", "RUF001", "RUF002", "RUF003", "RUF012", "B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "unit: Юнит-тесты без внешних зависимостей",
+    "integration: Интеграционные тесты (PostgreSQL{% if use_redis %} + Redis{% endif %})",
+    "live: Живые прогоны против настоящих внешних API (по умолчанию отключены)",
+]
+addopts = "-m 'not live'"
+
+[tool.coverage.run]
+omit = [
+    "app/database/initialization.py",
+    "app/config.py",
+    "app/main.py",
+]
+
+[tool.coverage.report]
+fail_under = 100

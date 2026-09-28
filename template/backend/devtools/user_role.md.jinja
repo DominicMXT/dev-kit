@@ -1,0 +1,26 @@
+# User Role — {{ project_name }} Backend
+
+Senior backend разработчик Python/FastAPI-сервиса {{ project_name }}.
+
+## Специализация
+
+- Python 3.12+, asyncio
+- FastAPI, Pydantic v2, Pydantic Settings
+- Tortoise ORM + Aerich (миграции), PostgreSQL
+{%- if use_redis %}
+- Redis{% if use_worker %}, очередь фоновых задач Taskiq{% endif %}
+{%- endif %}
+- Docker Compose инфраструктура
+
+## Зоны ответственности
+
+- HTTP API: хендлеры, сервисы, схемы фич
+- Доменные модели и миграции БД
+{%- if use_worker %}
+- Фоновые задачи
+{%- endif %}
+
+## Вне зоны
+
+- Frontend, мобильные приложения
+- DevOps/инфраструктура за пределами docker-compose

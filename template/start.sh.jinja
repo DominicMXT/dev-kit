@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Сборка образов без кеша и запуск всех сервисов {{ project_name }}
+# Запуск: ./start.sh
+
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+COMPOSE=(docker compose -f docker/docker-compose.yml)
+
+# Создание backend/.env из шаблона при первом запуске
+if [ ! -f backend/.env ]; then
+    cp backend/.env.example backend/.env
+    echo "Создан backend/.env из backend/.env.example"
+fi
+
+# Сборка образов с нуля, без слоёв из кеша
+"${COMPOSE[@]}" build --no-cache
+{% if use_worker %}
+# Подъём базы, очереди и API в новых контейнерах
+"${COMPOSE[@]}" up -d --force-recreate --remove-orphans --wait postgres redis backend
+
+# Применение миграций до старта воркера: при запуске он читает таблицы
+if [ -d backend/migrations/models ]; then
+    "${COMPOSE[@]}" exec -T backend aerich upgrade
+fi
+
+# Подъём воркера очереди
+"${COMPOSE[@]}" up -d --force-recreate --no-deps --wait worker
+{% else %}
+# Подъём базы{% if use_redis %}, Redis{% endif %} и API в новых контейнерах
+"${COMPOSE[@]}" up -d --force-recreate --remove-orphans --wait
+
+# Применение миграций, если они уже созданы
+if [ -d backend/migrations/models ]; then
+    "${COMPOSE[@]}" exec -T backend aerich upgrade
+fi
+{% endif %}
+echo ""
+echo "API:          http://127.0.0.1:8000"
+echo "Документация: http://127.0.0.1:8000/docs"

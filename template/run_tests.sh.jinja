@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Полный цикл тестирования {{ project_name }} Backend
+# Запуск: ./run_tests.sh
+
+cd "$(dirname "$0")"
+
+LOG=$(mktemp "${TMPDIR:-/tmp}/{{ project_slug }}_tests.XXXXXX")
+
+echo ""
+echo "╔══════════════════════════════════════════════╗"
+echo "║{{ (project_name | upper ~ ' — ТЕСТОВЫЙ ПАЙПЛАЙН') | center(46) }}║"
+echo "╚══════════════════════════════════════════════╝"
+echo ""
+
+echo "1️⃣  Поднимаем тестовое окружение (PostgreSQL{% if use_redis %} + Redis{% endif %})..."
+echo "    docker/docker-compose.test.yml → postgres_test{% if use_redis %} + redis_test{% endif %}"
+echo ""
+echo "2️⃣  Запуск тестов (unit / integration)..."
+echo ""
+echo "─────────────────────────────────────────────────────"
+
+docker compose -f docker/docker-compose.test.yml up --build --abort-on-container-exit 2>&1 | tee "$LOG"
+EXIT_CODE=${PIPESTATUS[0]}
+
+echo "─────────────────────────────────────────────────────"
+echo ""
+
+echo "3️⃣  Очистка: удаляем контейнеры и тестовые данные..."
+docker compose -f docker/docker-compose.test.yml down -v --remove-orphans 2>/dev/null
+
+echo ""
+COVERAGE=$(grep 'TOTAL' "$LOG" | tail -1 | awk '{print $NF}')
+PASSED=$(grep -oE '[0-9]+ passed' "$LOG" | tail -1)
+FAILED=$(grep -oE '[0-9]+ failed' "$LOG" | tail -1)
+SKIPPED=$(grep -oE '[0-9]+ skipped' "$LOG" | tail -1)
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+PASSED_N=$(echo "$PASSED"  | grep -oE '[0-9]+' | head -1)
+FAILED_N=$(echo "$FAILED"  | grep -oE '[0-9]+' | head -1)
+SKIPPED_N=$(echo "$SKIPPED" | grep -oE '[0-9]+' | head -1)
+TOTAL=$(( ${PASSED_N:-0} + ${FAILED_N:-0} + ${SKIPPED_N:-0} ))
+
+echo "╔══════════════════════════════════════════════╗"
+printf "║  %-43s║\n" "🧪 ТЕСТЫ ($TOTAL total)"
+echo "╠══════════════════════════════════════════════╣"
+printf "║  %-44s║\n" "Passed:   ${PASSED_N:-0}"
+[ -n "$FAILED_N"  ] && printf "║  %-44s║\n" "Failed:   $FAILED_N"
+[ -n "$SKIPPED_N" ] && printf "║  %-44s║\n" "Skipped:  $SKIPPED_N"
+printf "║  %-44s║\n" "Coverage: ${COVERAGE:-н/д}"
+echo "╚══════════════════════════════════════════════╝"
+echo ""
+
+if [ $EXIT_CODE -eq 0 ]; then
+    echo "╔══════════════════════════════════════════════╗"
+    printf "║  %-43s║\n" "✅ Все тесты прошли успешно!"
+    echo "╚══════════════════════════════════════════════╝"
+else
+    echo "╔══════════════════════════════════════════════╗"
+    printf "║  %-43s║\n" "❌ Есть упавшие тесты (exit: $EXIT_CODE)"
+    echo "╚══════════════════════════════════════════════╝"
+fi
+
+echo ""
+read -rp "  💾 Сохранить отчёт в корень проекта? [y/N]: " SAVE
+if [[ "$SAVE" =~ ^[Yy]$ ]]; then
+    REPORT="test_report_$(date '+%Y%m%d_%H%M%S').txt"
+    {
+        echo "╔══════════════════════════════════════════════╗"
+        printf "║  %-44s║\n" "{{ project_name | upper }} — ОТЧЁТ ТЕСТИРОВАНИЯ"
+        echo "╠══════════════════════════════════════════════╣"
+        printf "║  %-44s║\n" "Дата: $TIMESTAMP"
+        echo "╚══════════════════════════════════════════════╝"
+        echo ""
+        echo "╔══════════════════════════════════════════════╗"
+        printf "║  %-43s║\n" "🧪 ТЕСТЫ ($TOTAL total)"
+        echo "╠══════════════════════════════════════════════╣"
+        printf "║  %-44s║\n" "Passed:   ${PASSED_N:-0}"
+        [ -n "$FAILED_N"  ] && printf "║  %-44s║\n" "Failed:   $FAILED_N"
+        [ -n "$SKIPPED_N" ] && printf "║  %-44s║\n" "Skipped:  $SKIPPED_N"
+        printf "║  %-44s║\n" "Coverage: ${COVERAGE:-н/д}"
+        echo "╚══════════════════════════════════════════════╝"
+        echo ""
+        echo "╔══════════════════════════════════════════════╗"
+        if [ $EXIT_CODE -eq 0 ]; then
+            printf "║  %-43s║\n" "✅ РЕЗУЛЬТАТ: SUCCESS"
+        else
+            printf "║  %-43s║\n" "❌ РЕЗУЛЬТАТ: FAILED (exit: $EXIT_CODE)"
+        fi
+        echo "╚══════════════════════════════════════════════╝"
+        echo ""
+        echo "╔══════════════════════════════════════════════╗"
+        printf "║  %-44s║\n" "ПОЛНЫЙ ВЫВОД"
+        echo "╚══════════════════════════════════════════════╝"
+        cat "$LOG"
+    } > "$REPORT"
+    echo "  📄 Отчёт сохранён: $REPORT"
+fi
+
+rm -f "$LOG"
+echo ""
+
+exit $EXIT_CODE

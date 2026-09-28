@@ -1,0 +1,43 @@
+"""
+===========================================================================
+ CONFTEST — ОБЩИЕ ФИКСТУРЫ ДЛЯ ТЕСТОВ
+===========================================================================
+
+Хуки и фикстуры, доступные во всех тестах {{ project_name }} Backend.
+
+Содержимое:
+- pytest_collection_modifyitems — переименование тестов в русские комментарии
+"""
+
+import inspect
+
+
+# Переименование тестов по комментарию над функцией
+def pytest_collection_modifyitems(items: list) -> None:
+    """
+    Замена системного имени теста на однострочный комментарий над def.
+
+    Позволяет писать читаемые русские названия прямо в коде.
+
+    Args:
+        items: Список pytest-айтемов из сессии сбора тестов
+    """
+    for item in items:
+        try:
+            source_file = inspect.getfile(item.function)
+            _, start_line = inspect.getsourcelines(item.function)
+
+            # Чтение исходного файла
+            with open(source_file, encoding="utf-8") as f:
+                all_lines = f.readlines()
+
+            # Поиск комментария строкой выше def
+            comment_idx = start_line - 2
+            if comment_idx >= 0:
+                line = all_lines[comment_idx].strip()
+                if line.startswith("#"):
+                    label = line.lstrip("#").strip()
+                    if label:
+                        item._nodeid = item.nodeid.rsplit("::", 1)[0] + "::" + label
+        except (OSError, TypeError):
+            pass

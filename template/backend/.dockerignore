@@ -1,0 +1,21 @@
+# Секреты не попадают в контекст сборки и образ
+.env
+.env.*
+
+# Кеши и артефакты
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Dev-инфра в образах не нужна.
+# tests/ не исключается: их забирает Dockerfile.test, прод-Dockerfile копирует только app/.
+devtools/
+*.md
+
+# VCS
+.git
+.gitignore

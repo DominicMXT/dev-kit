@@ -1,0 +1,61 @@
+name: {{ project_slug | replace('_', '-') }}-test
+
+services:
+  postgres_test:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: {{ project_slug }}_test
+      POSTGRES_PASSWORD: {{ project_slug }}_test
+      POSTGRES_DB: {{ project_slug }}_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U {{ project_slug }}_test -d {{ project_slug }}_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+{%- if use_redis %}
+
+  redis_test:
+    image: redis:7-alpine
+    command: redis-server --protected-mode no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+{%- endif %}
+
+  backend_test:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.test
+    entrypoint: []
+    depends_on:
+      postgres_test:
+        condition: service_healthy
+{%- if use_redis %}
+      redis_test:
+        condition: service_healthy
+{%- endif %}
+    environment:
+      POSTGRES_HOST: postgres_test
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: {{ project_slug }}_test
+      POSTGRES_USER: {{ project_slug }}_test
+      POSTGRES_PASSWORD: {{ project_slug }}_test
+{%- if use_redis %}
+      REDIS_HOST: redis_test
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+{%- endif %}
+      RUN_MODE: test
+      DOCS_USERNAME: admin
+      DOCS_PASSWORD: test
+      CORS_ORIGINS: '["*"]'
+      CORS_CREDENTIALS: "true"
+      CORS_METHODS: '["*"]'
+      CORS_HEADERS: '["*"]'
+    command: >
+      sh -c "
+        echo '=== Запуск тестов {{ project_name }} Backend ===' &&
+        pytest -v --tb=short --cov=app --cov-report=term-missing tests/
+      "

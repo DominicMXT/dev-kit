@@ -1,0 +1,103 @@
+---
+name: new-project
+description: Старт нового бэкенд-проекта по шаблону dev-kit — каркас, git, ТЗ в docs/, CLAUDE.md проекта и план в NEXT_SESSION.md
+argument-hint: <Название> [пути к ТЗ и материалам] [git: none | new | <url репозитория>] [redis] [worker] [serena]
+disable-model-invocation: true
+---
+
+# Новый проект: $ARGUMENTS
+
+Шаблон проекта, общий кодстайл и личные правила — в `~/Work/dev-kit`:
+- `template/` + `copier.yml` — каркас: `docker/`, `start.sh`, `run_tests.sh`, `lint.sh`, `backend/` с pyproject, requirements, conftest, devtools
+- `standards/python-backend.md` — общий кодстайл, подключается импортом в `CLAUDE.md` проекта
+
+## Правила этой команды
+
+- Делать только шаги ниже. Код приложения не писать; тесты, docker и миграции не запускать; скиллы не добавлять.
+- Serena — только если в аргументах есть `serena`.
+- Всё, что выходит за папку нового проекта (создание репозитория на GitHub, пуш, правка `~/.claude`), — только после «да».
+
+## Шаг 1. Параметры
+
+Из аргументов взять, чего не хватает — спросить одним вопросом через AskUserQuestion:
+- **Название** → папка `~/Work/<Название>`; `project_slug` — латиница в snake_case (для «Order Service» — `order_service`)
+- **ТЗ и материалы** — файлы, папки или ссылки на репозитории; нет — так и записать
+- **Redis** — нужен или нет; **воркер очереди Taskiq** — нужен или нет (только вместе с Redis)
+- **Git**:
+  - `none` — без гита;
+  - `new` — новый локальный репозиторий;
+  - `<url>` — клон существующего.
+  Для `new` и `<url>` — ветка (по умолчанию `develop`) и автор коммитов (по умолчанию `DominicMXT <122555610+DominicMXT@users.noreply.github.com>`; у рабочих проектов бывает своя подпись — спросить)
+- **Описание** — одна строка, что это за сервис; нет — взять из ТЗ после шага 4
+
+Папка `~/Work/<Название>` уже есть и в ней что-то кроме `.git` — показать список и спросить, прежде чем продолжать.
+
+## Шаг 2. Каркас
+
+1. `git -C ~/Work/dev-kit status --porcelain` — если есть незакоммиченное, сказать и спросить: генерация идёт из последнего коммита.
+2. Клон, если выбран: `git clone <url> ~/Work/<Название>`.
+3. Генерация:
+   ```bash
+   uvx copier copy --vcs-ref HEAD --defaults \
+     -d project_name="<Название>" -d project_slug=<slug> -d description="<описание>" \
+     -d use_redis=<true|false> -d use_worker=<true|false> \
+     ~/Work/dev-kit ~/Work/<Название>
+   ```
+4. `chmod +x start.sh run_tests.sh lint.sh` в корне проекта.
+
+## Шаг 3. Git
+
+- `none` — ничего не делать.
+- `new` — `git init -b <ветка>`.
+- `<url>` — `git checkout -b <ветка>`, если такой ветки ещё нет.
+- Для `new` и `<url>`:
+  - `git config user.name` и `git config user.email` — автор из шага 1, только в локальном конфиге репозитория;
+  - в `.git/info/exclude` дописать `.serena/`, `.claude/`, `NEXT_SESSION.md`, `.copier-answers.yml`.
+- Коммит и пуш — только по команде пользователя.
+
+## Шаг 4. ТЗ и материалы
+
+1. Скопировать в `docs/`: файлы — как есть; репозиторий — копией без `.git`, коммит источника записать в `CLAUDE.md`.
+2. Прочитать каждый файл целиком:
+   - `.docx`, `.doc`, `.rtf`, `.html` — через `textutil -convert txt -stdout <файл>`, большие — частями;
+   - `.pdf` — Read с `pages`;
+   - остальное — Read.
+3. Вести счёт: прочитано N из N. Решения «по ТЗ» — только когда прочитано всё.
+
+## Шаг 5. CLAUDE.md проекта
+
+- Корневой `CLAUDE.md` — раздел «ТЗ и материалы»:
+  - карта файлов `docs/`;
+  - главное для кода: инварианты, запреты, словарь доменных имён, внешние интеграции.
+- Там же — стек и env-переменные, которые требует ТЗ.
+- `backend/devtools/CLAUDE.md` — только правила этого проекта: общие модули и их границы, доменные имена, особенности тестов.
+  Пустые разделы удалить. Общие правила не копировать — они подключены импортом.
+- ТЗ требует того, чего нет в шаблоне (другая БД, S3, векторы тестов, воркер) — не добавлять молча: списком в отчёт и вопрос.
+
+## Шаг 6. План
+
+`NEXT_SESSION.md` в корне:
+- этапы и задачи из ТЗ по порядку;
+- для каждой задачи — фича или модуль, файлы по правилам раскладки и какие нужны тесты.
+
+Код не писать.
+
+## Шаг 7. Serena (только если просили)
+
+Из корня проекта:
+```bash
+claude mcp add serena -- uvx --from git+https://github.com/oraios/serena serena start-mcp-server --context claude-code --project <абсолютный путь>
+uvx --from git+https://github.com/oraios/serena serena project create <абсолютный путь> --name "<Название>" --language python
+uvx --from git+https://github.com/oraios/serena serena memories initialize <абсолютный путь>
+```
+Memory (`core`, `tech_stack`, `suggested_commands`, `conventions`, `task_completion`) записывать через
+`serena memories write <имя> <путь> --file <md>`, проверка — `serena memories check`.
+
+## Шаг 8. Отчёт
+
+Коротко:
+- папка и режим git;
+- что создано — дерево без содержимого;
+- ТЗ: прочитано N из N, вопросы по ТЗ;
+- что из ТЗ не легло в шаблон;
+- следующий шаг: `cd ~/Work/<Название> && claude`, план — в `NEXT_SESSION.md`.
