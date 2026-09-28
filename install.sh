@@ -38,10 +38,10 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-data["attribution"] = {"commit": "", "pr": ""}
+data["attribution"] = {"commit": "", "pr": "", "sessionUrl": False}
 path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
-echo "settings.json: attribution.commit и attribution.pr пустые"
+echo "settings.json: подпись Claude в коммитах и PR отключена"
 
 # Проверка uv: copier запускается через uvx
 if ! command -v uvx >/dev/null 2>&1; then
