@@ -1,0 +1,19 @@
+{{ {
+  'default_server_config': {
+    'm.homeserver': {
+      'base_url': matrix_url_scheme ~ '://' ~ matrix_domain,
+      'server_name': matrix_server_name,
+    },
+  },
+  'brand': matrix_element_brand,
+  'disable_custom_urls': true,
+  'disable_guests': true,
+  'disable_3pid_login': true,
+  'show_labs_settings': false,
+  'room_directory': {'servers': [matrix_server_name]},
+  'setting_defaults': {
+    'UIFeature.registration': matrix_registration_enabled | bool,
+    'UIFeature.passwordReset': false,
+    'UIFeature.voip': false,
+  },
+} | to_nice_json(indent=2) }}

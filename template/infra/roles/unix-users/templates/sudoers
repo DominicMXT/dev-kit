@@ -1,0 +1,6 @@
+Defaults env_keep += SSH_AUTH_SOCK, secure_path = /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/snap/bin
+{% if ansible_facts.os_family == 'RedHat' %}
+%wheel ALL=(ALL:ALL) NOPASSWD: ALL
+{% else %}
+%sudo ALL=(ALL:ALL) NOPASSWD: ALL
+{% endif %}

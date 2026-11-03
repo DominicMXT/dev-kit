@@ -1,0 +1,15 @@
+app_env_template_file: .env
+app_env_directory: ''
+app_env_dest: '{% if "deploy" in ansible_play_role_names %}{{ ansistrano_release_path }}/{{ app_env_directory }}/{% else %}{{ app_env_directory }}/{% endif %}'
+app_env_files:
+- template_file: '{{ app_env_template_file }}'
+  dest: '{{ app_env_dest }}'
+
+app_env_disable_interpolation: false
+
+env_base_dir: /srv/{{ env_name }}
+ansistrano_deploy_to: '{{ env_base_dir }}'
+ansistrano_release_path: '{{ ansistrano_deploy_to }}/in-progress'
+
+deploy_user: deployer
+deploy_group: '{{ deploy_user }}'

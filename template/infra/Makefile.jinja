@@ -1,0 +1,40 @@
+HOST ?= dev
+STACK ?= {{ project_slug | replace('_', '-') }}-$(HOST)
+BOOTSTRAP_USER ?= root
+DEPLOY_KEY ?= ~/.ssh/{{ project_slug }}_deployer_ed25519
+MATRIX_HOST ?= chat
+
+.PHONY: install lint bootstrap build deploy check vault-edit status matrix matrix-check
+
+install:
+	ansible-galaxy install -r requirements.yml
+
+lint:
+	yamllint -d "{extends: .yamllint, rules: {quoted-strings: disable}}" \
+	  hosts.yml site.yml build.yml bootstrap.yml matrix.yml requirements.yml group_vars \
+	  host_vars/dev/vars.yml host_vars/chat/vars.yml roles/matrix
+	ansible-playbook --syntax-check bootstrap.yml build.yml site.yml matrix.yml
+
+bootstrap:
+	ansible-playbook bootstrap.yml -l $(HOST) -e ansible_user=$(BOOTSTRAP_USER) --diff
+
+build:
+	ansible-playbook build.yml -l $(HOST)
+
+deploy:
+	ansible-playbook site.yml -l $(HOST) --diff --private-key $(DEPLOY_KEY)
+
+check:
+	ansible-playbook site.yml -l $(HOST) --check --diff --private-key $(DEPLOY_KEY)
+
+matrix:
+	ansible-playbook matrix.yml -l $(MATRIX_HOST) --diff
+
+matrix-check:
+	ansible-playbook matrix.yml -l $(MATRIX_HOST) --check --diff
+
+vault-edit:
+	EDITOR=$${EDITOR:-nano} ansible-vault edit host_vars/$(HOST)/vault.yml
+
+status:
+	ansible $(HOST) --private-key $(DEPLOY_KEY) -m command -a 'docker stack services $(STACK)'

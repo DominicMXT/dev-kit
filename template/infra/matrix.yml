@@ -1,0 +1,21 @@
+- name: Matrix chat
+  hosts: matrix
+  pre_tasks:
+  - name: Prerequisite for deb822_repository in role nginx
+    apt:
+      name: python3-debian
+      update_cache: true
+      cache_valid_time: 3600
+      install_recommends: false
+    become: true
+
+  - name: Remove duplicate Docker apt source
+    file:
+      path: /etc/apt/sources.list.d/docker.sources
+      state: absent
+    become: true
+
+  roles:
+  - docker
+  - nginx
+  - matrix

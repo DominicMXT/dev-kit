@@ -1,0 +1,6 @@
+- name: Reload Nginx
+  systemd_service:
+    name: nginx
+    state: reloaded
+  become: true
+  ignore_errors: '{{ ansible_check_mode }}'

@@ -1,0 +1,7 @@
+unix_users_password_authentication: false
+
+unix_users_lock_unknown: true
+unix_users_keep: []
+
+ansible_managed: 'Managed by Ansible. Do not edit. Submit changes via pull request.
+  Role: {{ ansible_role_name | d("task") }}, template: {{ template_path | d("inline") }}'

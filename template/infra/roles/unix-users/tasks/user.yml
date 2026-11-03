@@ -1,0 +1,27 @@
+- name: Gather all OS groups via getent
+  getent:
+    database: group
+  register: group_db
+
+- name: Cache only the group names
+  set_fact:
+    os_group_names: '{{ group_db.ansible_facts.getent_group | map("split", ":") | map("first") | list }}'
+
+- name: User {{ item.username }}
+  user:
+    name: '{{ item.username }}'
+    group: '{{ item.group | d(omit) }}'
+    password: '{{ item.unix_user_password | d(omit) }}'
+    password_lock: '{{ item.unix_user_password | d() == "" }}'
+
+    expires: -1
+
+    groups: '{{
+      item.current_server.groups | d([]) | select("in", os_group_names) +
+      item.current_server.sudo | d(false) | ternary((ansible_facts.os_family == "RedHat") | ternary(["wheel"], ["sudo"]), [])
+    }}'
+    shell: '{{ item.shell | d("/bin/bash") }}'
+    home: '{{ item.home | d(omit) }}'
+    comment: '{{ item.comment | d() }}'
+  no_log: '{{ item.unix_user_password is defined }}'
+  notify: Reconnect SSH

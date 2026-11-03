@@ -1,0 +1,10 @@
+docker_live_restore: true
+docker_userland_proxy: false
+docker_registry_mirrors: false
+
+docker_bridge_interface: 172.17.0.1/24
+
+docker_force_host_dns: false
+
+ansible_managed: 'Managed by Ansible. Do not edit. Submit changes via pull request.
+  Role: {{ ansible_role_name | d("task") }}, template: {{ template_path | d("inline") }}'

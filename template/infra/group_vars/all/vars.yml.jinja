@@ -1,0 +1,18 @@
+swarm_registry_url: ghcr.io
+swarm_registry_image_path: ghcr.io/<владелец>/{{ project_slug | replace('_', '-') }}
+deploy_user: deployer
+
+app_src_dir: ../../backend
+
+deploy_migrations: false
+deploy_redis: {{ use_redis | lower }}
+deploy_worker: {{ use_worker | lower }}
+
+{% raw -%}
+deploy_pull_images: >-
+  {{ [swarm_registry_image_path ~ '-backend:' ~ env_name_short]
+     + ([swarm_registry_image_path ~ '-migrations:' ~ env_name_short] if deploy_migrations else []) }}
+{% endraw %}
+docker_live_restore: false
+
+logrotate_logs: []

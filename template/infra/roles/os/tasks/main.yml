@@ -1,0 +1,255 @@
+- name: Run as root
+  become: true
+  block:
+    - name: Safety check that running hosts are limited
+      assert:
+        that: ansible_limit is defined
+        fail_msg: You should limit run to exact group or host (-l / --limit)
+      run_once: true
+
+
+    - name: Set umask 002 for all users - normal users and root
+      lineinfile:
+        path: /etc/login.defs
+        regexp: ^UMASK\b
+        line: 'UMASK		002'
+
+
+    - name: Hostname
+      command: hostnamectl hostname '{{ os_hostname }}'
+      register: changed_hostname
+      changed_when: true
+      when:
+        - os_hostname is defined
+        - os_hostname != ansible_facts.hostname
+
+    - name: Changed hostname
+      ansible.builtin.setup:
+        filter:
+          - ansible_facts.hostname
+      when: changed_hostname is changed
+
+
+    - name: Increase soft limit of number of opened file descriptors | Directory
+      file:
+        path: /etc/systemd/system.conf.d
+        state: directory
+
+    - name: Increase soft limit of number of opened file descriptors | Config
+      copy:
+        content: |
+          [Manager]
+          DefaultLimitNOFILE=10240:524288
+        dest: /etc/systemd/system.conf.d/local.conf
+      notify: Reload systemd
+
+
+    - name: OS specific tasks
+      include_tasks: '{{ outer_item }}'
+      loop_control:
+        loop_var: outer_item
+      loop: '{{ q("first_found", params) }}'
+      vars:
+        params:
+          files:
+            - '{{ ansible_facts.os_family | lower }}.yml'
+
+
+    - name: Logrotate config
+      template:
+        src: '{{ item.src }}'
+        dest: '{{ item.dest }}'
+      loop:
+        - { src: logrotate.conf, dest: /etc }
+
+    - name: Logrotate frequency - directory
+      file:
+        dest: /etc/systemd/system/logrotate.timer.d
+        state: directory
+      when: os_logrotate_frequency == 'hourly'
+
+    - name: Logrotate frequency - config
+      copy:
+        content: |
+          [Timer]
+          OnCalendar=hourly
+          RandomizedDelaySec=10min
+          AccuracySec=1min
+        dest: /etc/systemd/system/logrotate.timer.d/override.conf
+      notify: Reload systemd
+      when: os_logrotate_frequency == 'hourly'
+
+
+    - name: Set timezone
+      timezone:
+        name: '{{ os_timezone }}'
+
+    - name: Locale
+      copy:
+        content: |
+          LANG=en_GB.UTF-8
+        dest: '{{
+          (ansible_facts.distribution == "Ubuntu" and (ansible_facts.distribution_major_version | int) <= 22 or
+          ansible_facts.distribution == "Debian" and (ansible_facts.distribution_major_version | int) <= 12) |
+          ternary("/etc/default/locale", "/etc/locale.conf") }}'
+
+    - name: Bash settings
+      template:
+        src: common.sh
+        dest: /etc/profile.d/
+
+    - name: needrestart settings file
+      copy:
+        content: |
+          $nrconf{restart} = 'l';
+          $nrconf{kernelhints} = -1;
+          $nrconf{ui} = 'NeedRestart::UI::stdio';
+        dest: /etc/needrestart/conf.d/local.conf
+
+
+    - name: Stat user MC config directory
+      stat:
+        path: /root/.config/mc/ini
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+      register: mc_user_config
+
+    - name: Apply MC options globally and locally
+      ini_file:
+        path: '{{ item.0 }}'
+        section: Midnight-Commander
+        option: '{{ item.1.key }}'
+        value: '{{ item.1.value }}'
+        no_extra_spaces: true
+      vars:
+        mc_paths:
+          - /etc/mc/mc.ini
+          - /root/.config/mc/ini
+        mc_options:
+          - { key: old_esc_mode_timeout,         value: 0        }
+          - { key: use_internal_edit,            value: 'true'   }
+          - { key: skin,                         value: julia256 }
+          - { key: editor_fill_tabs_with_spaces, value: 'true'   }
+          - { key: editor_visible_tabs,          value: 'false'  }
+          - { key: editor_tab_spacing,           value: 4        }
+      when: item.0 != '/root/.config/mc/ini' or mc_user_config.stat.exists
+      loop: '{{ mc_paths | product(mc_options) }}'
+
+    - name: Configure BlockShift keys in system mc keymap
+      ini_file:
+        path: /etc/mc/mc.default.keymap
+        section: editor
+        option: '{{ item.key }}'
+        value: '{{ item.value }}'
+      loop:
+        - { key: BlockShiftLeft,  value: ctrl-rbracket  }
+        - { key: BlockShiftRight, value: ctrl-backslash }
+
+
+    - name: byobu directory for root
+      file:
+        path: /root/.config/byobu/
+        state: directory
+
+    - name: byobu config
+      copy:
+        content: |
+          source $BYOBU_PREFIX/share/byobu/profiles/tmux
+          BYOBU_DATE=""
+          BYOBU_TIME=""
+        dest: /root/.config/byobu/profile.tmux
+
+    - name: byobu status
+      template:
+        src: byobu-status
+        dest: /root/.config/byobu/status
+
+    - name: byobu - remove old config path
+      file:
+        path: /root/.byobu/
+        state: absent
+
+
+    - name: QEMU package installation
+      package:
+        name: qemu-guest-agent
+      when: ansible_facts.system_vendor == 'QEMU'
+
+    - name: VMWare package installation
+      package:
+        name: open-vm-tools
+      when: ansible_virtualization_type == 'VMware'
+
+    - name: sysctl config
+      template:
+        src: sysctl.conf
+        dest: /etc/sysctl.d/local.conf
+      notify: Apply sysctl configs
+
+
+    - name: /etc/hosts file | Disable cloud-init template
+      copy:
+        content: |
+          manage_etc_hosts: false
+
+        dest: /etc/cloud/cloud.cfg.d/97-local.cfg
+      when:
+        - os_hosts is defined
+        - ansible_facts.distribution == 'Debian'
+
+    - name: /etc/hosts file | Set contents
+      copy:
+        content: |
+          127.0.0.1 {{ ansible_facts.hostname }} localhost
+          ::1       {{ ansible_facts.hostname }} localhost
+          {{ os_hosts }}
+
+        dest: /etc/hosts
+      when: os_hosts is defined
+
+
+    - name: Start systemd-resolved
+      systemd_service:
+        name: systemd-resolved
+        state: started
+        enabled: true
+      ignore_errors: '{{ ansible_check_mode }}'
+
+    - name: systemd-resolved resolv.conf symlink
+      file:
+        src: ../run/systemd/resolve/stub-resolv.conf
+        dest: /etc/resolv.conf
+        state: link
+        force: true
+      ignore_errors: '{{ ansible_check_mode }}'
+
+
+    - name: htop config
+      template:
+        src: htoprc
+        dest: /root/.config/htop/
+
+
+    - name: ZFS tuning
+      copy:
+        content: |
+          options zfs zfs_arc_sys_free={{ os_zfs_arc_sys_free }}
+
+        dest: /etc/modprobe.d/zfs.conf
+      notify: Update initramfs
+      when: os_zfs_arc_sys_free is defined
+
+
+    - name: SSH port
+      copy:
+        content: |
+          [Socket]
+          ListenStream=
+          ListenStream=0.0.0.0:{{ os_ssh_port }}
+          ListenStream=[::]:{{ os_ssh_port }}
+        dest: /etc/systemd/system/ssh.socket.d/override.conf
+      notify:
+        - Reload systemd
+        - Restart ssh.socket
+      when: os_ssh_port is defined

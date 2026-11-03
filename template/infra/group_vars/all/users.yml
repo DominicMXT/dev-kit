@@ -1,0 +1,7 @@
+users:
+- username: deployer
+  ssh_key: <открытый ключ deployer>
+  unix_user_servers:
+  - server: all
+    sudo: true
+    groups: [www-data, docker]

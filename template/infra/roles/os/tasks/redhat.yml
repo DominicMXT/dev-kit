@@ -1,0 +1,239 @@
+- name: Run as root
+  become: true
+  block:
+
+    - name: Get kernel args
+      command: grubby --info=DEFAULT
+      register: kernel_register
+      changed_when: false
+      check_mode: false
+
+    - name: 'Set kernel args: disable SELinux and enable PSI'
+      command: grubby --update-kernel ALL --args "{{ os_kernel_args_redhat }}"
+      when: os_kernel_args_redhat not in kernel_register.stdout
+
+    - name: 'Remove kernel args: disable crashkernel'
+      command: grubby --update-kernel ALL --remove-args "{{ os_kernel_remove_args_redhat }}"
+      when: os_kernel_remove_args_redhat in kernel_register.stdout
+
+
+    - name: DNF config
+      copy:
+        content: |
+          [main]
+          gpgcheck=1
+          installonly_limit=3
+          clean_requirements_on_remove=True
+          best=True
+          skip_if_unavailable=False
+          install_weak_deps=False
+          {% if os_package_proxy_url is defined %}
+          proxy={{ os_package_proxy_url }}
+          proxy_username={{ os_package_proxy_username }}
+          proxy_password={{ os_package_proxy_password }}
+          {% endif %}
+
+        dest: /etc/dnf/dnf.conf
+      diff: '{{ not lookup("env", "CI", default="false") | bool }}'
+
+    - name: Protect secrets
+      file:
+        path: /etc/dnf/dnf.conf
+        mode: u=rw,g=,o=
+      become: true
+      when: os_package_proxy_password is defined
+
+
+    - name: Prevent gpg-agent from spawning scdaemon
+      lineinfile:
+        path: /etc/gnupg/gpg-agent.conf
+        create: true
+        line: disable-scdaemon
+        insertafter: EOF
+
+
+    - name: Install latest kernel repositories
+      dnf:
+        name: oraclelinux-release-el9
+        state: latest
+        install_weak_deps: false
+      register: dnf_result
+      when:
+        - ansible_facts.distribution == 'OracleLinux'
+        - ansible_facts.distribution_major_version | int == 9
+
+    - name: Show dnf result
+      debug:
+        msg: '{{ dnf_result.results }}'
+      changed_when: true
+      when: dnf_result is changed
+
+
+    - name: Remove common packages
+      register: uninstall_res
+      dnf:
+        name:
+          - python-backports
+          - python-ipaddress
+          - kernel-devel
+          - kernel-uek-devel
+          - microcode_ctl
+          - pulseaudio
+          - pulseaudio-libs
+          - pulseaudio-utils
+          - sssd-client
+          - irqbalance
+          - firewalld
+          - ncdu
+          - kexec-tools
+          - dracut-network
+          - dracut-squash
+          - dracut-live
+        state: absent
+
+    - name: Show uninstall result
+      debug:
+        msg: '{{ uninstall_res.changes | d(uninstall_res.results) }}'
+      changed_when: true
+      when: uninstall_res is changed
+
+    - name: Install EPEL
+      dnf:
+        name: oracle-epel-release-el9
+        install_weak_deps: false
+      register: dnf_result
+      when:
+        - ansible_facts.distribution == 'OracleLinux'
+        - ansible_facts.distribution_major_version | int == 9
+
+    - name: Show dnf result
+      debug:
+        msg: '{{ dnf_result.results }}'
+      changed_when: true
+      when: dnf_result is changed
+
+    - name: Enable UEK8 kernel
+      community.general.dnf_config_manager:
+        name: ol9_UEKR8
+      ignore_errors: '{{ ansible_check_mode }}'
+      when:
+        - ansible_facts.distribution == 'OracleLinux'
+        - ansible_facts.distribution_major_version | int == 9
+
+    - name: Enable codeready_builder for "needrestart"
+      community.general.dnf_config_manager:
+        name: ol9_codeready_builder
+      when:
+        - ansible_facts.distribution == 'OracleLinux'
+        - ansible_facts.distribution_major_version | int == 9
+
+    - name: Install common packages
+      register: install_res
+      dnf:
+        name:
+          - glibc-langpack-en
+          - glibc-langpack-ru
+          - mc
+          - chrony
+          - byobu
+          - net-tools
+          - bind-utils
+          - rsync
+          - wget
+          - screen
+          - iotop
+          - psmisc
+          - sysstat
+          - zstd
+          - needrestart
+          - systemd-resolved
+          - htop
+          - mlocate
+        install_weak_deps: false
+      ignore_errors: '{{ ansible_check_mode }}'
+
+    - name: Show install result
+      debug:
+        msg: '{{ install_res.changes | d(install_res.results) }}'
+      changed_when: true
+      when: install_res is changed
+
+    - name: Remove packages after install
+      register: uninstall_res
+      dnf:
+        name:
+          - glibc-all-langpacks
+        state: absent
+
+    - name: Show uninstall result
+      debug:
+        msg: '{{ uninstall_res.changes | d(uninstall_res.results) }}'
+      changed_when: true
+      when: uninstall_res is changed
+
+
+    - name: atop config
+      copy:
+        content: |
+          LOGOPTS=""
+          LOGINTERVAL=60
+          LOGGENERATIONS=2
+          LOGPATH=/var/log/atop
+        dest: /etc/sysconfig/atop
+      notify: Restart atop
+      when: os_atop
+
+    - name: Install atop
+      dnf:
+        name: atop
+        install_weak_deps: false
+      ignore_errors: '{{ ansible_check_mode }}'
+      when: os_atop
+
+    - name: Start and enable atop
+      systemd_service:
+        name: '{{ item }}'
+        state: started
+        enabled: true
+      loop:
+        - atop
+        - atopacct
+        - atop-rotate.timer
+      when: os_atop
+      ignore_errors: '{{ ansible_check_mode }}'
+
+
+    - name: Install common packages (virtual)
+      when:
+        - ansible_virtualization_role != 'host'
+      register: install_res
+      dnf:
+        name: cloud-utils-growpart
+        install_weak_deps: false
+
+    - name: Show install result
+      debug:
+        msg: '{{ install_res.changes | d(install_res.results) }}'
+      changed_when: true
+      when: install_res is changed
+
+
+    - name: Install custom packages
+      dnf:
+        name: '{{ os_install_packages }}'
+        install_weak_deps: false
+      when: os_install_packages is defined
+      register: install_res
+
+    - name: Show install result
+      debug:
+        msg: '{{ install_res.changes | d(install_res.results) }}'
+      changed_when: true
+      when: install_res is changed
+
+
+    - name: Enable periodic block discard on supported drives
+      systemd_service:
+        name: fstrim.timer
+        state: started
+        enabled: true

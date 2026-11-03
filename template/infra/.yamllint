@@ -1,0 +1,30 @@
+rules:
+  indentation:
+    spaces: 2
+    indent-sequences: false
+  colons:
+    max-spaces-after: -1
+  commas:
+    max-spaces-after: -1
+  comments:
+    require-starting-space: false
+  document-start:
+    present: false
+  document-end:
+    present: false
+  empty-values:
+    forbid-in-block-mappings: true
+    forbid-in-flow-mappings: true
+  float-values:
+    forbid-inf: true
+    forbid-nan: true
+    forbid-scientific-notation: true
+    require-numeral-before-decimal: true
+  quoted-strings:
+    quote-type: single
+    required: only-when-needed
+    extra-allowed:
+    - ': | #'
+    - '[\[\]{},]'
+    - '[\d*]\.[\d*]'
+    - .{140,}

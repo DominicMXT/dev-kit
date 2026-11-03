@@ -1,0 +1,34 @@
+nginx_version: '1.28'
+
+nginx_worker_processes: '{% if ansible_facts.processor_nproc > 4 %}4{% else %}auto{% endif %}'
+nginx_tls: true
+
+nginx_maxage: 30
+nginx_log_dateext: true
+nginx_delaycompress: true
+nginx_renamecopy: false
+nginx_copytruncate: false
+
+nginx_log_realip: false
+nginx_log_realip_debug: false
+nginx_log_limit: false
+nginx_log_cache: false
+nginx_log_tls: false
+nginx_log_basic: false
+nginx_log_time_length_debug: false
+
+nginx_logrotate_frequency: daily
+
+nginx_websockets_proxy_pass: true
+
+nginx_ssl_session_cache_size: 10m
+nginx_client_max_body_size: 100m
+nginx_http3: true
+
+ansible_managed: 'Managed by Ansible. Do not edit. Submit changes via pull request.
+  Role: {{ ansible_role_name | d("task") }}, template: {{ template_path | d("inline") }}'
+nginx_apt_key_file: /etc/apt/keyrings/nginx-2024.asc
+nginx_delete_files:
+- /etc/apt/sources.list.d/nginx.list
+- /usr/share/keyrings/nginx-archive-keyring.asc
+- /etc/apt/keyrings/nginx-2016.asc

@@ -1,0 +1,22 @@
+logpath_prefix: /var/log/app
+relative_log_path: /etc/logrotate.d
+logpath_log_default_mask: "*.log"
+logpath_default_config: |
+    daily
+    maxsize 100M
+    maxage 90
+    rotate 90
+    dateext
+    dateyesterday
+    olddir archive
+    createolddir 2775 root root
+    compress
+    compresscmd /usr/bin/zstd
+    uncompresscmd /usr/bin/unzstd
+    compressoptions -15 --rm
+    compressext .zst
+    delaycompress
+    notifempty
+    missingok
+    copytruncate
+    su www-data www-data

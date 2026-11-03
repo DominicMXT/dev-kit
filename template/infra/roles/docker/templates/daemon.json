@@ -1,0 +1,43 @@
+{
+{% if docker_extra_config is defined %}
+  {{ docker_extra_config | trim | indent(2)  }}
+{% endif %}
+{% if docker_registry_mirrors %}
+  "registry-mirrors": [
+    "https://dh-mirror.gitverse.ru",
+    "https://cr.yandex/mirror"
+  ],
+{% endif %}
+{% if docker_live_restore %}
+  "live-restore": true,
+{% endif %}
+{% if docker_force_host_dns %}
+  "dns": ["172.17.0.1"],
+{% endif %}
+{% if docker_elastic_logging_hosts is defined %}
+  "log-driver": "elastic-logging-plugin",
+  "log-opts": {
+    "hosts" : "{{ docker_elastic_logging_hosts }}",
+    "api_key": "{{ docker_elastic_logging_api_key }}"
+  },
+{% else %}
+  "log-driver": "local",
+  "log-opts": {
+    "mode": "non-blocking",
+    "max-buffer-size": "10m"
+  },
+{% endif %}
+  "builder": {
+    "gc": {
+{% if docker_builder_keep_storage is defined %}
+      "defaultKeepStorage": "{{ docker_builder_keep_storage }}",
+{% endif %}
+      "enabled": true
+    }
+  },
+  "userland-proxy": {{ docker_userland_proxy | to_json }},
+  "bip": "{{ docker_bridge_interface }}",
+  "default-address-pools": [
+    {"base": "172.17.0.0/16", "size": 24}
+  ]
+}

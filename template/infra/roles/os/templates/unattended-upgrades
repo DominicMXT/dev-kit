@@ -1,0 +1,15 @@
+Unattended-Upgrade::Origins-Pattern {
+    "site=*";
+};
+{% if os_unattended_upgrades_reboot %}
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "03:10";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "false";
+{% endif %}
+
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+APT::Periodic::AutocleanInterval "14";
+
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";

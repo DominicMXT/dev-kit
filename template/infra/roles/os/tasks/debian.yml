@@ -1,0 +1,495 @@
+- name: Run as root
+  become: true
+  block:
+    - name: Update APT cache
+      apt:
+        update_cache: true
+        cache_valid_time: 172800
+      check_mode: false
+
+    - name: Keyrings directory for Ubuntu 20/Deban 11 and older
+      file:
+        path: /etc/apt/keyrings
+        mode: '755'
+        state: directory
+
+
+    - name: Cache negative DNS responses | Directory
+      file:
+        path: /etc/systemd/resolved.conf.d
+        state: directory
+      when:
+        - ansible_facts.distribution == 'Ubuntu' or ansible_facts.distribution == 'Debian'
+        - os_dns is defined
+        - os_netplan is not defined
+
+    - name: Cache negative DNS responses | Config
+      copy:
+        content: |
+          [Resolve]
+          {% if os_dns is defined and os_netplan is not defined %}
+          {% for dns in os_dns %}
+          DNS={{ dns }}
+          {% endfor %}
+          {% endif %}
+          {% if ansible_facts.distribution == 'Ubuntu' %}
+          Cache=yes
+          {% endif %}
+        dest: /etc/systemd/resolved.conf.d/local.conf
+      register: systemd_resolved_register
+      notify: Restart systemd-resolved
+      when:
+        - ansible_facts.distribution == 'Ubuntu' or ansible_facts.distribution == 'Debian'
+        - os_dns is defined
+        - os_netplan is not defined
+
+    - name: Restart systemd-resolved for new nameservers before updating apt cache
+      meta: flush_handlers
+      when: systemd_resolved_register is changed
+
+
+    - name: Don't overwrite modified config files on manual package upgrades without asking, for dpkg configs
+      copy:
+        content: |
+          Dpkg::Options {
+             "--force-confdef";
+             "--force-confold";
+          }
+
+          APT::Install-Recommends "false";
+
+          APT::Get::Show-Versions "true";
+          Aptitude::CmdLine::Show-Versions "true";
+
+          Aptitude::Delete-Unused "false";
+
+          Aptitude::CmdLine::Always-Prompt "true";
+
+          APT::Keep-Downloaded-Packages "false";
+          Aptitude::Clean-After-Install "true";
+
+        dest: /etc/apt/apt.conf.d/local
+
+    - name: Don't overwrite modified config files on manual package upgrades without asking, for ucf configs like "sshd-config"
+      copy:
+        content: |
+          conf_force_conffold=YES
+        dest: /etc/ucf.conf
+
+
+    - name: Disable Ubuntu Pro ads in 'apt'
+      copy:
+        content: |
+        dest: /etc/apt/apt.conf.d/20apt-esm-hook.conf
+      when: ansible_facts.distribution == 'Ubuntu'
+
+    - name: Clean up MOTD - '... additional security updates can be applied with ESM Infra'
+      file:
+        path: /var/lib/update-notifier/hide-esm-in-motd
+        state: touch
+        modification_time: preserve
+        access_time: preserve
+      when: ansible_facts.distribution == 'Ubuntu'
+
+    - name: Clean up MOTD - 'Documentation...'
+      file:
+        path: /etc/update-motd.d/10-help-text
+        mode: -x
+      when: ansible_facts.distribution == 'Ubuntu'
+
+
+    - name: Update apt cache with new repository before installing new packages
+      meta: flush_handlers
+
+
+    - name: Ubuntu 24 virtual
+      when:
+        - ansible_facts.distribution == 'Ubuntu'
+        - ansible_facts.distribution_major_version | int == 24
+        - ansible_facts.virtualization_role != 'host'
+        - ansible_facts.virtualization_type != 'lxc'
+      block:
+        - name: Install kernel
+          apt:
+            name: linux-image-virtual-hwe-24.04
+            install_recommends: false
+        - name: Remove old kernel (for upgrade)
+          apt:
+            name: linux-image-virtual-hwe-22.04
+            state: absent
+            purge: true
+
+    - name: Ubuntu 24 host
+      when:
+        - ansible_facts.distribution == 'Ubuntu'
+        - ansible_facts.distribution_major_version | int == 24
+        - ansible_facts.virtualization_role == 'host'
+      block:
+        - name: Install kernel
+          apt:
+            name: linux-image-generic-hwe-24.04
+            install_recommends: false
+        - name: Remove old kernel (for upgrade)
+          apt:
+            name: linux-image-generic-hwe-22.04
+            state: absent
+            purge: true
+
+
+    - name: Install first (Ubuntu 22 virtual)
+      when:
+        - ansible_facts.distribution == 'Ubuntu'
+        - ansible_facts.distribution_major_version | int == 22
+        - ansible_facts.virtualization_role != 'host'
+        - ansible_facts.virtualization_type != 'lxc'
+      apt:
+        name: linux-image-virtual-hwe-22.04
+        install_recommends: false
+
+    - name: Install first (Ubuntu 22 host)
+      when:
+        - ansible_facts.distribution == 'Ubuntu'
+        - ansible_facts.distribution_major_version | int == 22
+        - ansible_facts.virtualization_role == 'host'
+      apt:
+        name: linux-image-generic-hwe-22.04
+        install_recommends: false
+
+    - name: Install first (Ubuntu 20 virtual)
+      when:
+        - ansible_facts.distribution == 'Ubuntu'
+        - ansible_facts.distribution_major_version | int == 20
+        - ansible_facts.virtualization_role != 'host'
+        - ansible_facts.virtualization_type != 'lxc'
+      apt:
+        name: linux-image-virtual-hwe-20.04
+        install_recommends: false
+
+    - name: Install first (Ubuntu 20 host)
+      when:
+        - ansible_facts.distribution == 'Ubuntu'
+        - ansible_facts.distribution_major_version | int == 20
+        - ansible_facts.virtualization_role == 'host'
+      apt:
+        name: linux-image-generic-hwe-20.04
+        install_recommends: false
+
+    - name: Install first (Ubuntu 18 virtual)
+      when:
+        - ansible_facts.distribution == 'Ubuntu'
+        - ansible_facts.distribution_major_version | int == 18
+        - ansible_facts.virtualization_role != 'host'
+        - ansible_facts.virtualization_type != 'lxc'
+      apt:
+        name: linux-image-virtual-hwe-18.04
+        install_recommends: false
+
+    - name: Install first (Ubuntu 18 host)
+      when:
+        - ansible_facts.distribution == 'Ubuntu'
+        - ansible_facts.distribution_major_version | int == 18
+        - ansible_facts.virtualization_role == 'host'
+      apt:
+        name: linux-image-generic-hwe-18.04
+        install_recommends: false
+
+
+    - name: Install packages for Ubuntu 22+, Debian 11+
+      when: ansible_facts.distribution == 'Ubuntu' and
+            ansible_facts.distribution_major_version | int >= 22
+          or
+            ansible_facts.distribution == 'Debian' and
+            ansible_facts.distribution_major_version | int >= 11
+      apt:
+        name: plocate
+        install_recommends: false
+
+    - name: Install packages for Ubuntu 20-, Debian 10-
+      when: ansible_facts.distribution == 'Ubuntu' and
+            ansible_facts.distribution_major_version | int <= 20
+          or
+            ansible_facts.distribution == 'Debian' and
+            ansible_facts.distribution_major_version | int <= 10
+      apt:
+        name: mlocate
+        install_recommends: false
+
+    - name: Install packages for Ubuntu 20+, Debian 10+
+      when: ansible_facts.distribution == 'Ubuntu' and
+            ansible_facts.distribution_major_version | int >= 20
+          or
+            ansible_facts.distribution == 'Debian' and
+            ansible_facts.distribution_major_version | int >= 10
+      apt:
+        name: bind9-dnsutils
+        install_recommends: false
+
+    - name: Install packages for Ubuntu 23+, Debian 11+
+      when: ansible_facts.distribution == 'Ubuntu' and
+            ansible_facts.distribution_major_version | int >= 23
+          or
+            ansible_facts.distribution == 'Debian' and
+            ansible_facts.distribution_major_version | int >= 11
+      apt:
+        name: systemd-resolved
+        install_recommends: false
+
+    - name: Install packages for Ubuntu 18-, Debian 9-
+      when: ansible_facts.distribution == 'Ubuntu' and
+            ansible_facts.distribution_major_version | int <= 18
+          or
+            ansible_facts.distribution == 'Debian' and
+            ansible_facts.distribution_major_version | int <= 9
+      apt:
+        name: dnsutils
+        install_recommends: false
+
+
+    - name: Remove common packages (Debian)
+      apt:
+        name:
+          - popularity-contest
+          - crda
+          - iw
+          - unscd
+          - apport
+          - apport-symptoms
+          - sosreport
+          - fonts-ubuntu-console
+          - libc-devtools
+          - os-prober
+          - eject
+          - irqbalance
+          - ncdu
+          - motd-news-config
+        state: absent
+        purge: true
+      notify: Reset failed apport
+
+    - name: Remove unattended-upgrades (Debian)
+      apt:
+        name:
+          - unattended-upgrades
+        state: absent
+        purge: true
+      when:
+        - os_unattended_upgrades_manage | bool
+        - not os_unattended_upgrades
+
+    - name: Remove common packages on hold (Debian)
+      apt:
+        name:
+          - google-compute-engine-oslogin
+        state: absent
+        allow_change_held_packages: true
+        purge: true
+
+    - name: Remove useless packages for virtual machine
+      when: ansible_facts.virtualization_role != 'host'
+      apt:
+        name: '{{ os_vm_useless_packages }}'
+        state: absent
+        purge: true
+
+    - name: atop config (Debian)
+      copy:
+        content: |
+          LOGOPTS=""
+          LOGINTERVAL=60
+          LOGGENERATIONS=2
+          LOGPATH=/var/log/atop
+        dest: /etc/default/atop
+      notify: Restart atop
+      when: os_atop
+
+    - name: Install packages (Debian)
+      apt:
+        name: '{{ install_packages | select }}'
+        install_recommends: false
+      vars:
+        install_packages:
+          - aptitude
+          - less
+          - mc
+          - unzip
+          - zip
+
+          - sysstat
+          - htop
+          - lsof
+
+          - psmisc
+          - sudo
+          - byobu
+          - rsync
+          - traceroute
+          - curl
+          - bash-completion
+          - command-not-found
+          - gawk
+          - time
+          - etckeeper
+          - needrestart
+          - zstd
+          - '{{ "lshw" if os_lshw }}'
+          - '{{ "atop" if os_atop }}'
+          - '{{ "chrony" if os_chrony and ansible_facts.virtualization_type != "lxc" }}'
+          - '{{ ("netplan.io" if os_netplan is defined) or false }}'
+          - '{{ "unattended-upgrades" if os_unattended_upgrades }}'
+
+    - name: Запуск atop
+      systemd_service:
+        name: '{{ item }}'
+        state: started
+        enabled: true
+      become: true
+      ignore_errors: '{{ ansible_check_mode }}'
+      loop:
+        - atop
+        - atopacct
+        - atop-rotate.timer
+      when:
+        - os_atop
+        - not (ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_major_version | int <= 20)
+
+
+    - name: Make etckeeper not complaining when it is invoked by cron
+      git_config:
+        name: user.name
+        value: root
+        repo: /etc
+        scope: local
+      ignore_errors: '{{ ansible_check_mode }}'
+
+    - name: Install common packages (Debian virtual)
+      when:
+        - ansible_facts.virtualization_role != 'host'
+        - ansible_facts.virtualization_type != 'lxc'
+      apt:
+        name:
+          - cloud-guest-utils
+        install_recommends: false
+
+    - name: Install common packages (Ubuntu)
+      when: ansible_facts.distribution == 'Ubuntu'
+      apt:
+        name:
+          - update-notifier-common
+          - language-pack-en
+          - language-pack-ru
+          - landscape-common
+        install_recommends: false
+
+    - name: Install packages for host
+      when:
+        - ansible_facts.virtualization_role == 'host'
+      apt:
+        name:
+          - smartmontools
+        install_recommends: false
+
+    - name: Install custom packages
+      apt:
+        name: '{{ os_install_packages }}'
+        install_recommends: false
+      when: os_install_packages is defined
+
+    - name: Remove common packages 2 (Debian)
+      apt:
+        name: systemd-timesyncd
+        state: absent
+        purge: true
+      ignore_errors: '{{ ansible_check_mode }}'
+
+
+    - name: Improve configs
+      template:
+        src: '{{ item.src }}'
+        dest: '{{ item.dest }}'
+      loop:
+        - { src: inputrc, dest: /etc/ }
+        - { src: environment, dest: /etc/ }
+        - { src: profile, dest: /etc/ }
+        - { src: bash.bashrc, dest: /etc/ }
+      register: environment_files
+      notify: Reconnect SSH
+
+    - name: Reset SSH connection to pick up environmant changes (e.g. PATH)
+      meta: flush_handlers
+      when: environment_files is changed
+
+
+    - name: Install locales for Debian
+      when: ansible_facts.distribution == 'Debian'
+      locale_gen:
+        name: '{{ item }}'
+      loop:
+        - en_US.UTF-8
+        - en_GB.UTF-8
+        - ru_RU.UTF-8
+
+
+    - name: Netplan
+      copy:
+        content: |
+          {{ os_netplan }}
+
+        dest: /etc/netplan/60-local.yaml
+        mode: '0600'
+      notify: Netplan apply
+      when: os_netplan is defined
+
+
+    - name: nftables
+      copy:
+        content: |
+          #!/usr/sbin/nft -f
+          table inet managed-by-ansible
+          flush table inet managed-by-ansible
+          table inet managed-by-ansible {
+              {{ os_nft_table | indent(4) }}
+          }
+        dest: /etc/nftables.conf
+      notify: Reload nftables
+      when: os_nft_table is defined
+
+    - name: Enable nftables on boot
+      systemd_service:
+        name: nftables
+        enabled: true
+      when: os_nft_table is defined
+
+
+    - name: Disable atopacct on LXC
+      systemd_service:
+        name: atopacct
+        enabled: false
+      when:
+        - os_atop
+        - ansible_facts.virtualization_type == 'lxc'
+
+
+    - name: Disable sysstat-collect.timer
+      systemd_service:
+        name: sysstat-collect.timer
+        state: stopped
+        enabled: false
+      when: ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_major_version | int >= 22 or
+            ansible_facts.distribution == 'Debian' and ansible_facts.distribution_major_version | int >= 11
+      ignore_errors: '{{ ansible_check_mode }}'
+
+    - name: Disable sysstat-summary.timer
+      systemd_service:
+        name: sysstat-summary.timer
+        state: stopped
+        enabled: false
+      when: ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_major_version | int >= 22 or
+            ansible_facts.distribution == 'Debian' and ansible_facts.distribution_major_version | int >= 11
+      ignore_errors: '{{ ansible_check_mode }}'
+
+
+    - name: unattended-upgrades
+      template:
+        src: unattended-upgrades
+        dest: /etc/apt/apt.conf.d/50unattended-upgrades
+      when: os_unattended_upgrades

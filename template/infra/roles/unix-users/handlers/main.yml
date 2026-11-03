@@ -1,0 +1,8 @@
+- name: Reload SSH service
+  systemd:
+    name: '{{ (ansible_facts.os_family == "RedHat") | ternary("sshd", "ssh") }}'
+    state: reloaded
+  become: true
+
+- name: Reconnect SSH
+  meta: reset_connection

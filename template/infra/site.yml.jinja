@@ -1,0 +1,16 @@
+- name: Envs
+  hosts: {{ project_slug }}
+  roles:
+  - nginx-env
+  - docker-user-firewall
+
+- name: Deploy stack on manager
+  hosts: {{ project_slug }}
+  roles:
+  - app-env-files
+  - deploy-single-manager
+
+- name: Cleanup docker
+  hosts: {{ project_slug }}
+  roles:
+  - deploy-node-last

@@ -1,0 +1,5 @@
+- name: Restart logrotate
+  systemd:
+    name: logrotate
+    state: restarted
+  become: true

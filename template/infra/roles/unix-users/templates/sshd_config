@@ -1,0 +1,67 @@
+{% if not (ansible_facts.os_family == 'RedHat' and ansible_facts.distribution_major_version | int <= 7) %}
+Include /etc/ssh/sshd_config.d/*.conf
+{% endif %}
+{% if unix_users_ssh_port is defined %}
+Port {{ unix_users_ssh_port }}
+{% endif %}
+AuthorizedKeysFile .ssh/authorized_keys
+PasswordAuthentication {{ unix_users_password_authentication | ternary('yes', 'no') }}
+{% if ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_major_version | int >= 22
+   or ansible_facts.distribution == 'Debian' and ansible_facts.distribution_major_version | int >= 12 %}
+KbdInteractiveAuthentication no
+{% else %}
+ChallengeResponseAuthentication no
+{% endif %}
+UsePAM yes
+PrintMotd no
+AcceptEnv LANG LC_* COLORTERM NO_COLOR
+{% if ansible_facts.os_family == 'RedHat' %}
+Subsystem sftp /usr/libexec/openssh/sftp-server
+{% else %}
+Subsystem sftp /usr/lib/openssh/sftp-server
+{% endif %}
+{% if ansible_facts.os_family == 'RedHat' and ansible_facts.distribution_major_version | int <= 7 %}
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+{% endif %}
+{% if 'sftp' in unix_users_must_present | d() | map(attribute="current_server.groups") | reject("undefined") | flatten %}
+Match group sftp
+    ChrootDirectory %h
+    AllowTcpForwarding no
+    AllowAgentForwarding no
+    ForceCommand internal-sftp
+{% endif %}
+{% if 'sftp-password' in unix_users_must_present | d() | map(attribute="current_server.groups") | reject("undefined") | flatten %}
+Match group sftp-password
+    ChrootDirectory %h
+    AllowTcpForwarding no
+    AllowAgentForwarding no
+    ForceCommand internal-sftp
+    PasswordAuthentication yes
+{% endif %}
+{% if 'sftp-password-full' in unix_users_must_present | d() | map(attribute="current_server.groups") | reject("undefined") | flatten %}
+Match group sftp-password-full
+    AllowTcpForwarding no
+    AllowAgentForwarding no
+    ForceCommand internal-sftp
+    PasswordAuthentication yes
+{% endif %}
+{% if 'tunnel' in unix_users_must_present | d() | map(attribute="current_server.groups") | reject("undefined") | flatten %}
+Match group tunnel
+    AllowAgentForwarding no
+    ForceCommand echo 'This account can only be used for tunneling'
+{% endif %}
+{% if 'tunnel-postgres' in unix_users_must_present | d() | map(attribute="current_server.groups") | reject("undefined") | flatten %}
+Match group tunnel-postgres
+    AllowAgentForwarding no
+    ForceCommand echo 'This account can only be used for tunneling'
+    AllowTcpForwarding local
+    PermitOpen 127.0.0.1:5432 localhost:5432
+    PermitTTY no
+    AllowStreamLocalForwarding no
+{% endif %}
+{% if 'ssh-password' in unix_users_must_present | d() | map(attribute="current_server.groups") | reject("undefined") | flatten %}
+Match group ssh-password
+    PasswordAuthentication yes
+{% endif %}

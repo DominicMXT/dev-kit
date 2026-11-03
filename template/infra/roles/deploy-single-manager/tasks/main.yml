@@ -1,0 +1,126 @@
+- name: Project directory
+  file:
+    path: '{{ env_project_root }}'
+    state: directory
+    owner: '{{ deploy_owner }}'
+    group: '{{ deploy_group }}'
+    mode: g+rws
+  become: true
+
+- name: Write app files (configs, scripts, docs)
+  template:
+    src: '{{ item.src }}'
+    dest: '{{ item.dest }}'
+    group: '{{ deploy_group }}'
+    mode: '0640'
+  diff: false
+  loop:
+  - { src: docker-compose.yml, dest: '{{ env_project_root }}/docker-compose.yml' }
+  - { src: README.txt, dest: '{{ env_project_root }}/' }
+
+- name: Write app files without templating (docker-compose, scripts)
+  copy:
+    src: '{{ item.src }}'
+    dest: '{{ item.dest }}'
+    group: '{{ deploy_group }}'
+    mode: '{{ item.mode | d(omit) }}'
+  loop:
+  - { src: docker-stack-wait.sh, dest: '{{ env_project_root }}/', mode: a+x }
+  - { src: migrate.sh, dest: '{{ env_project_root }}/', mode: a+x }
+
+- name: Requirements for Ansible Docker
+  apt:
+    name:
+    - python3-jsondiff
+    - python3-docker
+    install_recommends: false
+    autoremove: true
+  become: true
+  when: ansible_os_family == 'Debian'
+
+
+- name: Requirements for Ansible Docker
+  dnf:
+    name:
+    - python3-jsondiff
+    - python3-pyyaml
+    - python3-requests
+    install_weak_deps: false
+  become: true
+  register: dnf_register
+  when: ansible_os_family == 'RedHat'
+
+- name: Show dnf result
+  debug:
+    msg: '{{ dnf_register.results }}'
+  changed_when: true
+  when: dnf_register is changed
+
+
+- name: Log into private registry
+  docker_login:
+    registry_url: '{{ swarm_registry_url }}'
+    username: '{{ lookup("env", "CI_DEPLOY_USER") or CI_DEPLOY_USER }}'
+    password: '{{ lookup("env", "CI_DEPLOY_PASSWORD") or CI_DEPLOY_PASSWORD }}'
+  when: (lookup('env', 'CI_REGISTRY_PASSWORD') | default('', true)) | length > 0
+  ignore_errors: '{{ ansible_check_mode }}'
+
+- name: Pull app images before stack update
+  docker_image:
+    name: '{{ item }}'
+    source: pull
+    force_source: true
+  loop: '{{ deploy_pull_images }}'
+  async: 3600
+  poll: 15
+  ignore_errors: '{{ ansible_check_mode }}'
+
+- name: Migrate database before stack update
+  args:
+    chdir: '{{ env_project_root }}'
+  command: >-
+    ./migrate.sh {{ docker_stack_name }}
+    {{ swarm_registry_image_path }}-migrations:{{ env_name_short }}
+    {{ env_project_root }}/.env {{ deploy_migrate_timeout_s }}
+  register: migrate_result
+  changed_when: "'Running upgrade' in migrate_result.stdout"
+  ignore_errors: '{{ ansible_check_mode }}'
+  when: deploy_migrations
+
+- name: Migration log
+  debug:
+    msg: '{{ migrate_result.stdout_lines | d([]) + migrate_result.stderr_lines | d([]) }}'
+  ignore_errors: '{{ ansible_check_mode }}'
+  when: deploy_migrations
+
+- name: Deploy stack from a compose file
+  docker_stack:
+    state: present
+    name: '{{ docker_stack_name }}'
+    with_registry_auth: true
+    compose:
+    - '{{ env_project_root }}/docker-compose.yml'
+  register: docker_stack_result
+
+- name: Docker Stack output
+  debug:
+    msg:
+    - '{{ docker_stack_result.stdout | d() + docker_stack_result.stderr | d() }}'
+  changed_when: true
+  ignore_errors: '{{ ansible_check_mode }}'
+
+- name: Check deploy state for errors
+  args:
+    chdir: '{{ env_project_root }}'
+  command: ./docker-stack-wait.sh -t {{ deploy_wait_timeout_s }} {{ docker_stack_name }}
+  changed_when: false
+  register: deploy_check_result
+  failed_when: false
+
+- name: Deploy log
+  debug:
+    msg:
+    - '{{ deploy_check_result.stdout + deploy_check_result.stderr }}'
+  changed_when: true
+  failed_when: deploy_check_result.rc != 0
+  ignore_errors: '{{ ansible_check_mode }}'

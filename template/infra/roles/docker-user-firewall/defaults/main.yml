@@ -1,0 +1,3 @@
+docker_user_blocked_ports:
+- '{{ compose_environment_port_prefix }}1'
+docker_user_external_interface: '{{ ansible_default_ipv4.interface }}'

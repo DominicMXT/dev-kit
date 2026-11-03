@@ -1,0 +1,13 @@
+- name: Restart Synapse
+  community.docker.docker_compose_v2:
+    project_src: '{{ matrix_base_dir }}'
+    services: [synapse]
+    state: restarted
+  become: true
+
+- name: Restart Element
+  community.docker.docker_compose_v2:
+    project_src: '{{ matrix_base_dir }}'
+    services: [element]
+    state: restarted
+  become: true

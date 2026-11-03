@@ -1,0 +1,226 @@
+- name: Override nginx_env_logs variable for include_role loop
+  set_fact:
+    nginx_env_logs: '{{ nginx_role_loop_item.nginx_env_logs }}'
+  when: nginx_role_loop_item.nginx_env_logs is defined
+
+- name: Override nginx_env_redirect_to_https variable for include_role loop
+  set_fact:
+    nginx_env_redirect_to_https: '{{ nginx_role_loop_item.nginx_env_redirect_to_https }}'
+  when: nginx_role_loop_item.nginx_env_redirect_to_https is defined
+
+- name: Stop recursion if we are in second role call
+  set_fact:
+    nginx_domains_extra: []
+  when: nginx_role_loop_item is defined
+
+
+- name: Run as root
+  become: true
+  block:
+    - name: Write password file
+      template:
+        src: '{{ item.src }}'
+        dest: '{{ item.dest }}'
+        group: nginx
+        mode: '0640'
+      diff: false
+      loop:
+        - { src: .passwd, dest: '/etc/nginx/conf.d/{{ env_name }}.passwd' }
+      when: nginx_env_basic_login is truthy
+
+    - name: ACME challenge is handled by Ansible
+      when: nginx_env_acme_challenge not in ['none', 'manual']
+      block:
+
+        - name: Install Snap package
+          apt:
+            name: snapd
+            install_recommends: false
+          when: ansible_facts.os_family == 'Debian'
+
+        - name: Install Snap package (RedHat)
+          dnf:
+            name: snapd
+            install_weak_deps: false
+          register: dnf_register
+          when: ansible_facts.os_family == 'RedHat'
+
+        - name: Show dnf result
+          debug:
+            msg: '{{ dnf_register.results }}'
+          changed_when: true
+          when: dnf_register is changed
+
+        - name: For classic snaps
+          file:
+            path: /snap
+            src: /var/lib/snapd/snap
+            state: link
+          ignore_errors: '{{ ansible_check_mode }}'
+          when: ansible_facts.os_family == 'RedHat'
+
+        - name: Start snapd
+          service:
+            name: snapd.socket
+            state: started
+            enabled: true
+          ignore_errors: '{{ ansible_check_mode }}'
+          when: ansible_facts.os_family == 'RedHat'
+
+
+        - name: Install Certbot
+          snap:
+            name: certbot
+            classic: true
+          ignore_errors: '{{ ansible_check_mode }}'
+
+        - name: Check if required certificate already exists
+          command: >
+            certbot certificates --cert-name {{ nginx_tls_cert_name }} --domains {{ nginx_tls_domains | join(',') }}
+          register: domain_certificate
+          throttle: 1
+          until: domain_certificate is not failed
+
+          check_mode: false
+          changed_when: false
+          ignore_errors: '{{ ansible_check_mode }}'
+
+        - name: Check existing certificates
+          set_fact:
+            certificate_exists: >-
+              {{ domain_certificate.stdout | regex_search('^\s*(?:Domains|Identifiers):\s*(.*)$', '\1', multiline=True) |
+                d([''], true) | first | split | symmetric_difference(nginx_tls_domains) | length == 0 }}
+
+
+    - name: Write Nginx config
+      template:
+        src: '{{ item.src }}'
+        dest: '{{ item.dest }}'
+      loop:
+        - { src: nginx-env.conf, dest: '/etc/nginx/conf.d/{{ env_name }}.conf' }
+      notify: Reload Nginx
+      register: nginx_env_config
+
+
+    - name: ACME challenge is handled by Ansible
+      when: nginx_env_acme_challenge not in ['none', 'manual']
+      block:
+
+        - name: Test new nginx config
+          command: nginx -t
+          changed_when: false
+          ignore_errors: true
+          register: nginx_env_test_config
+          when: nginx_env_config is changed
+
+        - name: Temporary remove lines with not existent yet domain certificates
+          lineinfile:
+            dest: /etc/nginx/conf.d/{{ env_name }}.conf
+            state: absent
+            regexp: ^\s*(ssl_certificate|ssl_certificate_key|ssl_trusted_certificate|include|ssl_dhparam) +/etc/letsencrypt
+          register: nginx_env_temporary_remove
+          when:
+            - nginx_env_test_config is not succeeded
+            - not certificate_exists
+
+
+        - name: Obtain TLS certificates using HTTP challenge
+          command: >
+            certbot certonly {{ (nginx_env_certbot_email | length > 0) | ternary('--email ' ~ nginx_env_certbot_email, '--register-unsafely-without-email') }} --agree-tos --noninteractive
+              --nginx --no-redirect
+              --cert-name {{ nginx_tls_cert_name }} --domains {{ nginx_tls_domains | join(',') }}
+          throttle: 1
+
+          changed_when: true
+          when:
+            - nginx_env_acme_challenge == 'http'
+            - not certificate_exists
+
+
+        - name: Get acme-dns-client
+          unarchive:
+            remote_src: true
+            src: https://github.com/acme-dns/acme-dns-client/releases/download/v{{ acme_dns_client_version }}/acme-dns-client_{{ acme_dns_client_version }}_linux_amd64.tar.gz
+            dest: /usr/local/bin
+            include: acme-dns-client
+          become: true
+          when: nginx_env_acme_challenge == 'dns'
+
+        - name: Acmedns directory
+          file:
+            path: /etc/acmedns
+            mode: '700'
+            state: directory
+          become: true
+          when:
+            - nginx_env_acme_challenge == 'dns'
+            - '"acme-dns-client-clientstorage-vault.json" is file'
+
+        - name: Client storage
+          copy:
+            src: acme-dns-client-clientstorage-vault.json
+            dest: /etc/acmedns/clientstorage.json
+            mode: '0600'
+          diff: false
+          become: true
+          when:
+            - nginx_env_acme_challenge == 'dns'
+            - '"acme-dns-client-clientstorage-vault.json" is file'
+
+        - name: Obtain TLS certificates using DNS challenge
+          become: true
+          command: >
+            certbot certonly {{ (nginx_env_certbot_email | length > 0) | ternary('--email ' ~ nginx_env_certbot_email, '--register-unsafely-without-email') }} --agree-tos --noninteractive
+              --authenticator manual --preferred-challenges dns --manual-auth-hook acme-dns-client
+              --installer nginx --no-redirect
+              --cert-name {{ nginx_tls_cert_name }} --domains {{ nginx_tls_domains | join(',') }}
+          throttle: 1
+          changed_when: true
+          when:
+            - nginx_env_acme_challenge == 'dns'
+            - not certificate_exists
+
+        - name: Deploy virtual hosts config (final, original files, second time)
+          template:
+            src: '{{ item.src }}'
+            dest: '{{ item.dest }}'
+          loop:
+            - { src: nginx-env.conf, dest: '/etc/nginx/conf.d/{{ env_name }}.conf' }
+          notify: Reload Nginx
+          when: nginx_env_temporary_remove is changed
+
+
+    - name: Start nginx
+      service:
+        name: nginx
+        state: started
+        enabled: true
+      ignore_errors: '{{ ansible_check_mode }}'
+
+
+- name: Multiple domains and certificates
+  include_role:
+    name: nginx-env
+  loop: '{{ nginx_domains_extra | d([]) }}'
+  loop_control:
+    loop_var: nginx_role_loop_item
+  vars:
+    nginx_domains: '{{ nginx_role_loop_item.nginx_domains }}'
+    env_name: '{{ nginx_role_loop_item.env_name | d(nginx_role_loop_item.nginx_domains | first) }}'
+    nginx_env_base_dir: '{{ nginx_role_loop_item.nginx_env_base_dir | d("/srv/" + nginx_role_loop_item.env_name |
+      d(nginx_role_loop_item.nginx_domains | first)) }}'
+    nginx_env_server_extra: '{{ nginx_role_loop_item.nginx_env_server_extra }}'
+    nginx_env_http_extra: '{{ nginx_role_loop_item.nginx_env_http_extra }}'
+    nginx_env_acme_challenge: '{{ nginx_role_loop_item.nginx_env_acme_challenge | d("none") }}'
+    nginx_tls_domains: '{{ nginx_role_loop_item.nginx_tls_domains | d(nginx_domains) }}'
+    nginx_tls_cert_name: '{{ nginx_role_loop_item.nginx_tls_cert_name |
+      d((nginx_role_loop_item.nginx_domains | length == 1) |
+         ternary(nginx_role_loop_item.nginx_domains | first,
+         nginx_role_loop_item.env_name | d(nginx_role_loop_item.nginx_domains | first))) }}'
+    nginx_http_port: '{{ nginx_role_loop_item.nginx_http_port | d(80) }}'
+    nginx_listen_http: '{{ nginx_role_loop_item.nginx_listen_http | d(true) }}'
+    nginx_https_port: '{{ nginx_role_loop_item.nginx_https_port | d(443) }}'
+    nginx_env_basic_login: '{{ nginx_role_loop_item.nginx_env_basic_login | d("") }}'
+    nginx_env_basic_hash: '{{ nginx_role_loop_item.nginx_env_basic_hash }}'
+    nginx_env_basic_password: '{{ nginx_role_loop_item.nginx_env_basic_password }}'
+    nginx_env_basic_salt: '{{ nginx_role_loop_item.nginx_env_basic_salt }}'

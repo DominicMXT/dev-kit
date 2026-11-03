@@ -1,0 +1,17 @@
+- name: Render logrotate logs from template
+  become: true
+  block:
+    - name: Create directory if not exists
+      file:
+        path: "{{ logpath_prefix }}/{{ item.relative_log_path | d(item.name) }}"
+        state: directory
+        mode: '0775'
+        owner: "{{ item.owner | default('www-data') }}"
+        group: "{{ item.group | default('www-data') }}"
+      loop: "{{ logrotate_logs }}"
+    - name: Generate config by template
+      template:
+        src: logrotate-template.j2
+        dest: "{{ relative_log_path }}/{{ item.name }}"
+      notify: Restart logrotate
+      loop: "{{ logrotate_logs }}"

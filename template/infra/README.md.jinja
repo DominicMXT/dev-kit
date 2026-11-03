@@ -1,0 +1,108 @@
+{% set app = project_slug | replace('_', '-') -%}
+# infra
+
+Ansible для {{ project_name }}: настройка сервера и деплой в Docker Swarm. Стенд `dev` — один сервер:
+Swarm-менеджер, PostgreSQL{% if use_redis %}, Redis{% endif %}, backend{% if use_worker %}, воркер{% endif %} и Nginx перед backend.
+Образы собираются из `backend/`.
+
+## Файлы
+
+```text
+hosts.yml                      инвентарь: {{ project_slug }} → dev_group → dev
+bootstrap.yml                  первичная настройка: ОС, пользователи, Docker, Nginx, Swarm
+build.yml                      сборка образов и push в реестр
+site.yml                       Nginx, firewall, .env, docker stack deploy, чистка образов
+matrix.yml                     Matrix-чат на хосте из группы matrix
+group_vars/all/vars.yml        реестр, состав стека, app_src_dir
+group_vars/all/users.yml       SSH-пользователи
+group_vars/all/zz-local.yml    локальные переопределения, не в git
+host_vars/dev/vars.yml         каталоги, порт, Nginx, параметры ОС, переменные .env
+host_vars/dev/vault.yml        секреты dev (ansible-vault)
+host_vars/chat/                домены и секреты Matrix-чата
+templates/docker-compose.yml   стек Swarm
+roles/                         роли
+```
+
+## Подготовка
+
+1. `make install` — коллекции Ansible.
+2. Пароль vault — случайная строка в `vault-password.txt`, файл не в git.
+3. Ключ деплоя:
+
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/{{ project_slug }}_deployer_ed25519 -C {{ app }}-deployer
+   ```
+
+   Открытый ключ — в `group_vars/all/users.yml`.
+4. IP сервера — в `hosts.yml`.
+5. Реестр образов — `swarm_registry_image_path` в `group_vars/all/vars.yml`.
+6. Секреты dev:
+
+   ```bash
+   ansible-vault create host_vars/dev/vault.yml
+   ```
+
+   ```yaml
+   app_env_vault_dev:
+     POSTGRES_PASSWORD: <пароль базы>
+{%- if use_redis %}
+     REDIS_PASSWORD: <пароль Redis>
+{%- endif %}
+     DOCS_PASSWORD: <пароль /docs>
+   ```
+
+## Сервер
+
+```bash
+ansible-playbook bootstrap.yml -l dev -e ansible_user=root --check --diff
+make bootstrap
+```
+
+Если root по ключу закрыт — `make bootstrap BOOTSTRAP_USER=<пользователь с sudo>`.
+Параметры ОС — в `host_vars/dev/vars.yml`. `os_unattended_upgrades` не включать: роль обновит и docker-ce,
+а это перезапуск всех контейнеров. Часть настроек `daemon.json` (log-driver, bip) применяется только после
+`systemctl restart docker` — по той же причине вручную.
+
+## Сборка и деплой
+
+```bash
+export CI_REGISTRY_USER=<логин GitHub> CI_REGISTRY_PASSWORD=<PAT с write:packages>
+make build
+export CI_DEPLOY_USER=<логин GitHub> CI_DEPLOY_PASSWORD=<PAT с read:packages>
+make check
+make deploy
+make status
+```
+
+`make check` — `site.yml` с `--check --diff`, на сервере ничего не меняет.
+Стек — `{{ app }}-dev`, файлы на сервере — в `/opt/{{ app }}/dev`. Backend слушает порт 8081, снаружи он закрыт,
+запросы идут через Nginx.
+
+Переменные `.env` — `app_env_vars_dev` в `host_vars/dev/vars.yml`. Секретные там пустые, значения — в
+`app_env_vault_dev`: `make vault-edit`, затем `make deploy`.
+
+## Миграции
+
+Выключены: `deploy_migrations: false`. Для включения нужен `docker/Dockerfile.migrations` — образ из `backend/`,
+который по умолчанию выполняет `aerich upgrade`. Первый деплой прогонит миграции сервисом стека,
+следующие — через `migrate.sh` до обновления стека.
+
+## Matrix-чат
+
+Synapse, Element Web и PostgreSQL в Docker Compose в `/srv/matrix`, перед ними Nginx с Let's Encrypt.
+Регистрация закрыта, федерация выключена.
+
+1. A-записи `matrix_domain` и `matrix_element_domain` — на IP хоста, порты 80 и 443 открыты.
+2. Домены — в `host_vars/chat/vars.yml`.
+3. Секреты — `ansible-vault create host_vars/chat/vault.yml`: `matrix_postgres_password`,
+   `matrix_registration_shared_secret`, `matrix_macaroon_secret_key`, `matrix_form_secret`
+   и `matrix_users` (`name`, `password`, `admin`).
+4. Хост — в группу `matrix` в `hosts.yml`.
+5. `make matrix-check`, затем `make matrix`.
+
+Бэкап: `/srv/matrix/synapse` и том `matrix_postgres`.
+
+## HTTPS
+
+Для HTTPS по домену в `host_vars/dev/vars.yml`: домен — в `nginx_domains`, `nginx_env_acme_challenge: http`,
+почта Let's Encrypt — в `nginx_env_certbot_email`. Домен должен указывать на сервер, порты 80 и 443 открыты.

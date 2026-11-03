@@ -1,0 +1,56 @@
+- name: Restart systemd-resolved
+  systemd_service:
+    name: systemd-resolved
+    state: restarted
+  become: true
+  ignore_errors: '{{ ansible_check_mode }}'
+
+- name: Update apt cache
+  apt:
+    update_cache: true
+  become: true
+  check_mode: false
+
+- name: Apply sysctl configs
+  command: sysctl --system
+  become: true
+
+- name: Reload systemd
+  systemd_service:
+    daemon_reload: true
+  become: true
+
+- name: Netplan apply
+  command: netplan apply
+  become: true
+
+- name: Restart atop
+  systemd_service:
+    name: atop
+    state: restarted
+  become: true
+  ignore_errors: '{{ ansible_check_mode }}'
+
+- name: Reload nftables
+  systemd_service:
+    name: nftables
+    state: reloaded
+  become: true
+
+- name: Update initramfs
+  command: update-initramfs -u -k all
+  become: true
+
+- name: Reset failed apport
+  command: systemctl reset-failed apport
+  become: true
+  failed_when: false
+
+- name: Restart ssh.socket
+  systemd_service:
+    name: ssh.socket
+    state: restarted
+  become: true
+
+- name: Reconnect SSH
+  meta: reset_connection

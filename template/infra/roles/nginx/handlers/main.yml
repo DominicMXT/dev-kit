@@ -1,0 +1,11 @@
+- name: Reload Nginx
+  service:
+    name: nginx
+    state: reloaded
+  ignore_errors: '{{ ansible_check_mode }}'
+  become: true
+
+- name: Update apt cache
+  apt:
+    update_cache: true
+  become: true

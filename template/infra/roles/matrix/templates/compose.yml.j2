@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: {{ matrix_postgres_image }}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: {{ matrix_postgres_user }}
+      POSTGRES_PASSWORD: {{ matrix_postgres_password | to_json }}
+      POSTGRES_DB: {{ matrix_postgres_db }}
+      POSTGRES_INITDB_ARGS: --encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+    - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U {{ matrix_postgres_user }} -d {{ matrix_postgres_db }}]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  synapse:
+    image: {{ matrix_synapse_image }}
+    restart: unless-stopped
+    environment:
+      SYNAPSE_CONFIG_PATH: /data/homeserver.yaml
+      UID: '{{ matrix_synapse_uid }}'
+      GID: '{{ matrix_synapse_gid }}'
+    volumes:
+    - {{ matrix_synapse_dir }}:/data
+    ports:
+    - 127.0.0.1:{{ matrix_synapse_port }}:8008
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  element:
+    image: {{ matrix_element_image }}
+    restart: unless-stopped
+    volumes:
+    - {{ matrix_base_dir }}/element-config.json:/app/config.json:ro
+    ports:
+    - 127.0.0.1:{{ matrix_element_port }}:80
+
+volumes:
+  postgres: {}

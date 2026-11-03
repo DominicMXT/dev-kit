@@ -1,0 +1,6 @@
+- name: Restart docker-user-firewall
+  systemd:
+    name: docker-user-firewall
+    state: restarted
+    daemon_reload: true
+  become: true

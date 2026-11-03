@@ -1,0 +1,13 @@
+/vault-password.txt
+/group_vars/*/zz-local.yml
+/.ansible-fact-cache/
+/temporary-build/
+
+/.ansible/
+.venv
+
+/.idea/
+.DS_Store
+
+# Шаблон .env роли app-env-files
+!/roles/app-env-files/templates/.env

@@ -1,0 +1,5 @@
+- name: Create env files
+  include_tasks: env-files-loop.yml
+  loop_control:
+    loop_var: app_env_item
+  loop: '{{ app_env_files }}'

@@ -1,0 +1,39 @@
+nginx_version: '1.28'
+
+nginx_address_ipv6: '::'
+
+nginx_http_port: 80
+nginx_listen_http: true
+
+nginx_https_port: 443
+
+nginx_http3: true
+nginx_env_http3: '{{ nginx_http3 }}'
+
+env_name: '{{ nginx_domains | first }}'
+acme_challenge: none
+
+nginx_env_acme_challenge: '{{ acme_challenge }}'
+
+acme_dns_client_version: 0.3
+nginx_env_certbot_email: ''
+nginx_tls_cert_name: '{{ (nginx_domains | length == 1) | ternary(nginx_domains | first, env_name) }}'
+nginx_tls_domains: '{{ nginx_domains }}'
+
+nginx_env_base_dir: '{{ env_base_dir }}'
+env_base_dir: /srv/{{ env_name }}
+
+nginx_env_basic_login: ''
+
+nginx_env_root: current/public
+nginx_env_log_format: combined_ext buffer=2m flush=1s
+nginx_env_logs: |-
+  access_log /var/log/nginx/{{ env_name }}-access.log {{ nginx_env_log_format }};
+  error_log  /var/log/nginx/{{ env_name }}-error.log notice;
+
+nginx_env_redirect_to_https: |-
+  return 308 https://$host$request_uri;
+nginx_env_strip_www: true
+
+ansible_managed: 'Managed by Ansible. Do not edit. Submit changes via pull request.
+  Role: {{ ansible_role_name | d("task") }}, template: {{ template_path | d("inline") }}'

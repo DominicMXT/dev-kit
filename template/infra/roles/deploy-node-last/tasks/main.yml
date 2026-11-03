@@ -1,0 +1,21 @@
+- name: Requirements for Ansible Docker
+  dnf:
+    name:
+    - python-requests
+    install_weak_deps: false
+  become: true
+  register: dnf_register
+  when: ansible_os_family == 'RedHat'
+
+- name: Show dnf result
+  debug:
+    msg: '{{ dnf_register.results }}'
+  changed_when: true
+  when: dnf_register is changed
+
+
+- name: Prune unused and dangling images and volumes
+  docker_prune:
+    images: true
+    images_filters:
+      until: 168h

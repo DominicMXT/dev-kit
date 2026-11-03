@@ -1,0 +1,3 @@
+{{ logpath_prefix }}/{{ item.relative_path | d(item.name) }}/{{ item.log_mask | d(logpath_log_default_mask) }} {
+{{ item.config | d(logpath_default_config) | indent(4, first=true) }}
+}

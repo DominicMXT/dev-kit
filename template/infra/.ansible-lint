@@ -1,0 +1,15 @@
+skip_list:
+- fqcn
+- name[casing]
+- var-naming[no-role-prefix]
+- risky-file-permissions
+- meta-no-info
+
+- role-name
+
+enable_list:
+- empty-string-compare
+- no-log-password
+- no-prompting
+- no-same-owner
+- yaml

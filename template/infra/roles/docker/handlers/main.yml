@@ -1,0 +1,27 @@
+- name: Update apt cache
+  apt:
+    update_cache: true
+  become: true
+
+- name: Reload Docker
+  service:
+    name: docker
+    state: reloaded
+  become: true
+  listen: Reload Docker
+  ignore_errors: '{{ ansible_check_mode }}'
+
+- name: Reload Docker
+  debug:
+    msg: |
+      Docker was reloaded. Not all changes can be applied, manually restart Docker if needed.
+      This may restart all containers!
+      systemctl restart docker
+  changed_when: true
+  listen: Reload Docker
+
+- name: Restart systemd-resolved
+  systemd_service:
+    name: systemd-resolved
+    state: restarted
+  become: true

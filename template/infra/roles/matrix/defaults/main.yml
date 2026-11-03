@@ -1,0 +1,28 @@
+matrix_domain: ''
+matrix_element_domain: ''
+matrix_server_name: '{{ matrix_domain }}'
+
+matrix_base_dir: /srv/matrix
+matrix_synapse_dir: '{{ matrix_base_dir }}/synapse'
+matrix_synapse_uid: 991
+matrix_synapse_gid: 991
+
+matrix_synapse_image: ghcr.io/element-hq/synapse:v1.163.1
+matrix_element_image: ghcr.io/element-hq/element-web:v1.12.32
+matrix_postgres_image: postgres:17-alpine
+
+matrix_synapse_port: 8008
+matrix_element_port: 8080
+
+matrix_postgres_user: synapse
+matrix_postgres_db: synapse
+
+matrix_federation_enabled: false
+matrix_registration_enabled: false
+matrix_max_upload_size: 100M
+
+matrix_acme_challenge: http
+matrix_url_scheme: "{{ (matrix_acme_challenge == 'none') | ternary('http', 'https') }}"
+matrix_element_brand: Element
+
+matrix_users: []

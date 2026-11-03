@@ -1,0 +1,169 @@
+- name: Check required variables
+  assert:
+    that:
+    - matrix_domain | length > 0
+    - matrix_element_domain | length > 0
+    - matrix_element_domain != matrix_domain
+    - matrix_postgres_password | d('') | length > 0
+    - matrix_registration_shared_secret | d('') | length > 0
+    - matrix_macaroon_secret_key | d('') | length > 0
+    - matrix_form_secret | d('') | length > 0
+    - matrix_users | rejectattr('name', 'defined') | list | length == 0
+    - matrix_users | rejectattr('password', 'defined') | list | length == 0
+    fail_msg: >-
+      Set matrix_domain and matrix_element_domain (different domains) in host_vars/<host>/vars.yml,
+      matrix_postgres_password, matrix_registration_shared_secret, matrix_macaroon_secret_key, matrix_form_secret
+      and matrix_users (name, password, admin) in host_vars/<host>/vault.yml
+    quiet: true
+
+- name: Run as root
+  become: true
+  block:
+  - name: Base directory
+    file:
+      path: '{{ matrix_base_dir }}'
+      state: directory
+      mode: '0750'
+
+  - name: Synapse data directory
+    file:
+      path: '{{ matrix_synapse_dir }}'
+      state: directory
+      owner: '{{ matrix_synapse_uid }}'
+      group: '{{ matrix_synapse_gid }}'
+      mode: '0750'
+
+  - name: Synapse config
+    template:
+      src: '{{ item.src }}'
+      dest: '{{ matrix_synapse_dir }}/{{ item.dest }}'
+      owner: '{{ matrix_synapse_uid }}'
+      group: '{{ matrix_synapse_gid }}'
+      mode: '0600'
+    loop:
+    - {src: homeserver.yaml.j2, dest: homeserver.yaml}
+    - {src: log.config.j2, dest: log.config}
+    diff: false
+    notify: Restart Synapse
+
+  - name: Element config
+    template:
+      src: element-config.json.j2
+      dest: '{{ matrix_base_dir }}/element-config.json'
+      mode: '0644'
+    notify: Restart Element
+
+  - name: Compose file
+    template:
+      src: compose.yml.j2
+      dest: '{{ matrix_base_dir }}/compose.yml'
+      mode: '0600'
+    diff: false
+
+  - name: Check Synapse signing key
+    stat:
+      path: '{{ matrix_synapse_dir }}/signing.key'
+    register: matrix_signing_key
+
+  - name: Generate Synapse signing key
+    command: >-
+      docker run --rm --user {{ matrix_synapse_uid }}:{{ matrix_synapse_gid }}
+      --volume {{ matrix_synapse_dir }}:/data --entrypoint generate_signing_key
+      {{ matrix_synapse_image }} -o /data/signing.key
+    changed_when: true
+    when: not matrix_signing_key.stat.exists
+
+  - name: Start containers
+    community.docker.docker_compose_v2:
+      project_src: '{{ matrix_base_dir }}'
+      state: present
+    ignore_errors: '{{ ansible_check_mode }}'
+
+  - name: Apply config changes
+    meta: flush_handlers
+
+  - name: Wait for Synapse
+    uri:
+      url: http://127.0.0.1:{{ matrix_synapse_port }}/health
+    register: matrix_health
+    until: matrix_health.status == 200
+    retries: 60
+    delay: 2
+    when: not ansible_check_mode
+
+  - name: Register users
+    community.docker.docker_compose_v2_exec:
+      project_src: '{{ matrix_base_dir }}'
+      service: synapse
+      argv:
+      - register_new_matrix_user
+      - --config
+      - /data/homeserver.yaml
+      - --user
+      - '{{ item.name }}'
+      - --password
+      - '{{ item.password }}'
+      - "{{ (item.admin | d(false)) | ternary('--admin', '--no-admin') }}"
+      - --exists-ok
+      - http://localhost:8008
+    loop: '{{ matrix_users }}'
+    loop_control:
+      label: '{{ item.name }}'
+    register: matrix_register
+    changed_when: "'Success' in matrix_register.stdout"
+    no_log: true
+    when: not ansible_check_mode
+
+- name: Nginx for Synapse
+  include_role:
+    name: nginx-env
+  vars:
+    nginx_domains: ['{{ matrix_domain }}']
+    nginx_domains_extra: []
+    env_name: matrix
+    nginx_env_acme_challenge: '{{ matrix_acme_challenge }}'
+    nginx_env_base_dir: ''
+    nginx_env_root: nonexistent
+    nginx_env_server_extra: |-
+      client_max_body_size {{ matrix_max_upload_size }};
+
+      location ~ ^(/_matrix|/_synapse/client) {
+          proxy_pass http://127.0.0.1:{{ matrix_synapse_port }};
+          proxy_read_timeout 600s;
+      }
+
+      location = /.well-known/matrix/client {
+          default_type application/json;
+          add_header Access-Control-Allow-Origin * always;
+          return 200 '{{ {'m.homeserver': {'base_url': matrix_url_scheme ~ '://' ~ matrix_domain}} | to_json }}';
+      }
+      {% if matrix_federation_enabled %}
+
+      location = /.well-known/matrix/server {
+          default_type application/json;
+          return 200 '{{ {'m.server': matrix_domain ~ ':443'} | to_json }}';
+      }
+      {% endif %}
+
+      location / {
+          return 404;
+      }
+
+- name: Nginx for Element
+  include_role:
+    name: nginx-env
+  vars:
+    nginx_domains: ['{{ matrix_element_domain }}']
+    nginx_domains_extra: []
+    env_name: element
+    nginx_env_acme_challenge: '{{ matrix_acme_challenge }}'
+    nginx_env_base_dir: ''
+    nginx_env_root: nonexistent
+    nginx_env_server_extra: |-
+      add_header X-Frame-Options SAMEORIGIN always;
+      add_header X-Content-Type-Options nosniff always;
+      add_header Content-Security-Policy "frame-ancestors 'self'" always;
+
+      location / {
+          proxy_pass http://127.0.0.1:{{ matrix_element_port }};
+      }

@@ -1,0 +1,12 @@
+docker_stack_name: '{{ env_name }}'
+
+env_base_dir: /srv/{{ env_name }}
+env_project_root: '{{ env_base_dir }}'
+deploy_user: deployer
+deploy_owner: '{{ deploy_user }}'
+deploy_group: '{{ deploy_user }}'
+
+deploy_pull_images: []
+deploy_migrations: true
+deploy_wait_timeout_s: 600
+deploy_migrate_timeout_s: 300

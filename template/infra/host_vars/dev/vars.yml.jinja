@@ -1,0 +1,43 @@
+env_name: {{ project_slug | replace('_', '-') }}-dev
+env_name_short: dev
+env_base_dir: /opt/{{ project_slug | replace('_', '-') }}/dev
+{% raw -%}
+env_project_root: '{{ env_base_dir }}'
+app_env_directory: '{{ env_project_root }}'
+compose_environment_port_prefix: '808'
+
+nginx_domains: ['{{ ansible_host }}']
+nginx_listen_http: true
+nginx_env_acme_challenge: none
+nginx_env_server_extra: |
+  client_max_body_size 1m;
+  location / {
+      proxy_pass http://127.0.0.1:{{ compose_environment_port_prefix }}1;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+{% endraw %}
+unix_users_lock_unknown: false
+os_timezone: UTC
+os_unattended_upgrades_manage: false
+os_vm_useless_packages: [linux-firmware, fwupd, fwupd-signed, libfwupd2, intel-microcode]
+
+app_env_vars_dev:
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: {{ project_slug }}
+  POSTGRES_USER: {{ project_slug }}
+  POSTGRES_PASSWORD: ''
+{%- if use_redis %}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  REDIS_PASSWORD: ''
+{%- endif %}
+  CORS_ORIGINS: ['*']
+  CORS_CREDENTIALS: true
+  CORS_METHODS: ['*']
+  CORS_HEADERS: ['*']
+  RUN_MODE: prod
+  DOCS_USERNAME: admin
+  DOCS_PASSWORD: ''

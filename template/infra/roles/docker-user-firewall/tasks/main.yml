@@ -1,0 +1,23 @@
+- name: Firewall script for DOCKER-USER
+  template:
+    src: docker-user-firewall.sh.j2
+    dest: /usr/local/sbin/docker-user-firewall.sh
+    mode: '0755'
+  become: true
+  notify: Restart docker-user-firewall
+
+- name: Firewall unit for DOCKER-USER
+  template:
+    src: docker-user-firewall.service.j2
+    dest: /etc/systemd/system/docker-user-firewall.service
+    mode: '0644'
+  become: true
+  notify: Restart docker-user-firewall
+
+- name: Firewall unit enabled and started
+  systemd:
+    name: docker-user-firewall
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true

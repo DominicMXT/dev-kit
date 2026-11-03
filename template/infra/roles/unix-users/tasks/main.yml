@@ -1,0 +1,153 @@
+- name: Run as root
+  become: true
+  block:
+
+  - name: Prepare users, that should present
+    set_fact:
+      unix_users_must_present: '{{ unix_users_must_present | d([]) + [item.0 | combine({"current_server": item.1})] }}'
+    when:
+    - item.0.username not in unix_users_must_present | d() | map(attribute='username')
+    - inventory_hostname in query('inventory_hostnames', item.1.server)
+    loop: '{{ users | subelements("unix_user_servers", skip_missing=true) }}'
+    loop_control:
+      label: 'user: {{ item.0.username }}'
+
+  - name: Prepare list of ignored users
+    set_fact:
+      unix_users_ignore: '{{ ["nobody", "nfsnobody", ansible_facts.user_id] + unix_users_keep }}'
+
+  - name: Ignore current user
+    set_fact:
+      unix_users_ignore: '{{ unix_users_ignore | union([item.username]) }}'
+    when:
+    - item.unix_user_servers | d(false)
+    - item.unix_user_servers | map(attribute='server') | flatten | intersect(group_names) | length or
+        inventory_hostname in (item.unix_user_servers | map(attribute='server') | flatten)
+    loop: '{{ ignore_users }}'
+
+
+  - name: Restore home directory of previously locked user
+    command:
+      argv:
+      - mv
+      - --no-clobber
+      - '{{ src }}'
+      - '{{ dst }}'
+      creates: '{{ dst }}'
+      removes: '{{ src }}'
+    vars:
+      src: '{{ item.home is defined | ternary(home_defined, "/home/" ~ item.username ~ ".disabled") }}'
+      dst: '{{ item.home | d("/home/" ~ item.username) }}'
+      home_defined: '{{ item.home ~ ".disabled" }}'
+    loop: '{{ unix_users_must_present | d([]) }}'
+    loop_control:
+      label: 'user: {{ item.username }}'
+
+  - name: Install sudo
+    apt:
+      name:
+      - sudo
+      install_recommends: false
+    when: ansible_facts.os_family == 'Debian'
+
+  - name: Allow passwordless sudo
+    template:
+      src: sudoers
+      dest: /etc/sudoers.d/common
+      validate: visudo -cf %s
+
+  - name: Users
+    include_tasks: user.yml
+    loop: '{{ unix_users_must_present | d([]) }}'
+    loop_control:
+      label: 'user: {{ item.username }}, sudo: {{ item.current_server.sudo | d(false) }},
+        groups: {{ item.current_server.groups | d([]) }}, password: {{ item.unix_user_password is defined }}'
+    register: user_task
+    ignore_errors: '{{ ansible_check_mode }}'
+
+  - name: SFTP users
+    file:
+      path: /home/{{ item.username }}
+      owner: root
+    when: '"sftp" in item.current_server.groups | d([]) or "sftp-password" in item.current_server.groups | d([])'
+    loop: '{{ unix_users_must_present | d([]) }}'
+    loop_control:
+      label: 'user: {{ item.username }}, groups: {{ item.current_server.groups | d([]) }}'
+    ignore_errors: '{{ ansible_check_mode }}'
+
+  - name: Add authorized key for ssh key authentication
+    authorized_key:
+      user: '{{ item.username }}'
+      key: '{{ item.ssh_key | d() }}'
+      exclusive: '{{ item.not_exclusive_ssh_key if item.not_exclusive_ssh_key is defined else "yes" }}'
+      follow: true
+    loop: '{{ unix_users_must_present | d([]) }}'
+    ignore_errors: '{{ ansible_check_mode }}'
+    loop_control:
+      label: 'user: {{ item.username }}, key: {{ item.ssh_key is defined }}, exclusive: {{ item.not_exclusive_ssh_key | d(false) }}'
+
+  - name: Get list of non-system users on server
+    shell: |
+      set -o errexit -o pipefail
+      getent passwd | awk -F: '$3 >= 1000 && $3 < 64000 {print $1}'
+    args:
+      executable: /bin/bash
+    register: existing_users
+    changed_when: false
+    check_mode: false
+
+  - name: SSHd config
+    template:
+      src: sshd_config
+      dest: /etc/ssh/sshd_config
+      validate: /usr/sbin/sshd -T -f %s
+    notify: Reload SSH service
+
+  - name: Lock unknown users with UID >= 1000
+    user:
+      name: '{{ item }}'
+      expires: 1
+      create_home: false
+    when:
+    - unix_users_lock_unknown | bool
+    - existing_users is not skipped
+    - item not in unix_users_ignore
+    - item not in unix_users_must_present | d() | map(attribute = 'username')
+    loop: '{{ existing_users.stdout_lines }}'
+    register: locked_users
+
+  - name: Rename home directory of locked users
+    command:
+      argv:
+      - mv
+      - --no-clobber
+      - '{{ src }}'
+      - '{{ dst }}'
+      creates: '{{ dst }}'
+      removes: '{{ src }}'
+    vars:
+      src: '{{ item.home }}'
+      dst: '{{ item.home }}.disabled'
+    when: item is not skipped
+    loop: '{{ locked_users.results }}'
+    loop_control:
+      label: 'user: {{ item.item }}'
+
+  - name: Reset SSH connection to allow new group changes to affect current login user
+    meta: flush_handlers
+    when: user_task is changed
+
+  - name: Note that users are managed
+    copy:
+      content: |
+        Linux users on this server are managed by Ansible, any user changes will be lost.
+      dest: /home/README.txt
+    when: unix_users_lock_unknown | bool
+
+  - name: Note that root user is managed
+    copy:
+      content: |
+        "root" user on this server is managed by Ansible, any "root" user changes will be lost.
+      dest: /root/.ssh/README.txt
+    when:
+    - '"root" in unix_users_must_present | d() | map(attribute = "username")'

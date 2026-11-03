@@ -8,7 +8,7 @@ disable-model-invocation: true
 # Новый проект: $ARGUMENTS
 
 Шаблон проекта, общий кодстайл и личные правила — в `~/Work/dev-kit`:
-- `template/` + `copier.yml` — каркас: `docker/`, `start.sh`, `run_tests.sh`, `lint.sh`, `backend/` с pyproject, requirements, conftest, devtools
+- `template/` + `copier.yml` — каркас: `docker/`, `start.sh`, `run_tests.sh`, `lint.sh`, `backend/` с pyproject, requirements, conftest, devtools, `infra/` с Ansible для сервера и деплоя
 - `standards/python-backend.md` — общий кодстайл, подключается импортом в `CLAUDE.md` проекта
 
 ## Правила этой команды

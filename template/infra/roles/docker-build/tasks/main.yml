@@ -1,0 +1,47 @@
+- name: Local docker compose build and push
+  delegate_to: localhost
+  run_once: true
+  block:
+
+  - name: Write app files (configs, scripts, docs)
+    template:
+      src: '{{ item.src }}'
+      dest: '{{ item.dest }}'
+      mode: '0600'
+    diff: false
+    no_log: true
+    loop:
+    - { src: docker-compose.yml, dest: temporary-build/ }
+
+  - name: Log into private registry
+    docker_login:
+      registry_url: '{{ swarm_registry_url }}'
+      username: '{{ lookup("env", "CI_REGISTRY_USER") }}'
+      password: '{{ lookup("env", "CI_REGISTRY_PASSWORD") }}'
+    when: (lookup('env', 'CI_REGISTRY_PASSWORD') | default('', true)) | length > 0
+    ignore_errors: '{{ ansible_check_mode }}'
+
+  - name: docker compose build
+    args:
+      chdir: temporary-build
+    command: docker compose build
+    ignore_errors: '{{ ansible_check_mode }}'
+    changed_when: true
+
+  - name: Dummy app.env file for push
+    copy:
+      content: |
+      dest: temporary-build/.env
+
+  - name: docker compose push
+    args:
+      chdir: temporary-build
+    command: docker compose push
+    ignore_errors: '{{ ansible_check_mode }}'
+    register: push_reg
+    changed_when: '" Pushed" in push_reg.stdout'
+
+  - name: Remove remporary build directory
+    file:
+      path: temporary-build
+      state: absent

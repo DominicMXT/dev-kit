@@ -1,0 +1,183 @@
+- name: Run as root
+  become: true
+  block:
+
+  - name: Check Nginx key file (Debian)
+    stat:
+      path: '{{ nginx_apt_key_file }}'
+      get_attributes: false
+      get_checksum: false
+      get_mime: false
+    register: nginx_key_register
+    when: ansible_facts.os_family == 'Debian'
+
+  - name: Nginx key (Debian)
+    get_url:
+      url: https://nginx.org/keys/nginx_signing.key
+      dest: '{{ nginx_apt_key_file }}'
+    when:
+    - ansible_facts.os_family == 'Debian'
+    - not nginx_key_register.stat.exists
+    - not ansible_check_mode
+
+  - name: Nginx repository (Debian)
+    deb822_repository:
+      name: nginx
+      uris: https://nginx.org/packages/{{ ansible_facts.distribution | lower }}
+      signed_by: '{{ nginx_apt_key_file }}'
+      suites: '{{ ansible_facts.distribution_release }}'
+      components: nginx
+    notify: Update apt cache
+    register: nginx_repository_register
+    when: ansible_facts.os_family == 'Debian'
+
+  - name: Delete old files (Debian)
+    file:
+      path: '{{ item }}'
+      state: absent
+    loop: '{{ nginx_delete_files }}'
+    when: ansible_facts.os_family == 'Debian'
+
+  - name: Update apt cache with new repository before installing new packages (Debian)
+    meta: flush_handlers
+    when: nginx_repository_register is changed
+
+  - name: Nginx repository priority (Debian-family)
+    copy:
+      content: |
+        Explanation: Prefer vendor repository (generic - max wins)
+        Package: *
+        Pin: release o=nginx
+        Pin-Priority: 900
+
+        Explanation: Define original priority for Ubuntu.com repository (specific - first wins)
+        Package: nginx nginx-module-*
+        Pin: release o=Ubuntu
+        Pin-Priority: 500
+
+        Explanation: Fix major version for repository (specific - first wins)
+        Package: nginx nginx-module-*
+        Pin: version {{ nginx_version }}.*
+        Pin-Priority: 910
+      dest: /etc/apt/preferences.d/nginx
+    when: ansible_facts.os_family == 'Debian'
+
+
+  - name: Install packages
+    apt:
+      name: nginx
+      install_recommends: false
+    when: ansible_facts.os_family == 'Debian'
+
+  - name: Add repository
+    copy:
+      content: |
+        [nginx-stable]
+        name=nginx stable repo
+        baseurl=https://nginx.org/packages/centos/$releasever/$basearch/
+        gpgcheck=1
+        enabled=1
+        gpgkey=https://nginx.org/keys/nginx_signing.key
+        module_hotfixes=true
+
+        [nginx-mainline]
+        name=nginx mainline repo
+        baseurl=https://nginx.org/packages/mainline/centos/$releasever/$basearch/
+        gpgcheck=1
+        enabled=0
+        gpgkey=https://nginx.org/keys/nginx_signing.key
+        module_hotfixes=true
+      dest: /etc/yum.repos.d/nginx.repo
+    when: ansible_facts.os_family == 'RedHat'
+
+  - name: Install
+    dnf:
+      name: python3-dnf-plugin-versionlock
+    register: dnf_result
+    when: ansible_facts.os_family == 'RedHat'
+
+  - name: Show result
+    debug:
+      msg: '{{ dnf_result.results }}'
+    changed_when: true
+    when: dnf_result is changed
+
+  - name: Don't upgrade major version
+    community.general.dnf_versionlock:
+      name: nginx-2:{{ nginx_version }}.*
+      raw: true
+    ignore_errors: '{{ ansible_check_mode }}'
+    when: ansible_facts.os_family == 'RedHat'
+
+  - name: Install
+    dnf:
+      name: nginx
+    register: dnf_result
+    ignore_errors: '{{ ansible_check_mode }}'
+    when: ansible_facts.os_family == 'RedHat'
+
+  - name: Show result
+    debug:
+      msg: '{{ dnf_result.results }}'
+    changed_when: true
+    when: dnf_result is changed
+
+
+  - name: Remove default virtual host
+    file:
+      path: /etc/nginx/conf.d/default.conf
+      state: absent
+
+  - name: Configs
+    template:
+      src: '{{ item.src }}'
+      dest: '{{ item.dest }}'
+    loop:
+    - { src: logrotate.conf, dest: /etc/logrotate.d/nginx }
+
+  - name: Write required files
+    template: { src: '{{ item.src }}', dest: '{{ item.dest }}' }
+    loop:
+    - { src: ssl-dhparams.pem, dest: /etc/nginx/ }
+    when: nginx_tls
+
+  - name: Generate dummy certificate
+    command: openssl req -new -newkey rsa:2048 -sha256 -x509 -nodes -keyout /etc/ssl/private/dummy.key
+      -out /etc/ssl/certs/dummy.pem -days 36500 -subj '/CN=*' -addext 'basicConstraints=CA:FALSE'
+    args:
+      creates: /etc/ssl/certs/dummy.pem
+    when:
+    - nginx_tls
+    - ansible_facts.os_family == 'Debian'
+
+  - name: Generate dummy certificate
+    command: openssl req -new -newkey rsa:2048 -sha256 -x509 -nodes -keyout /etc/pki/tls/private/dummy.key
+      -out /etc/pki/tls/certs/dummy.pem -days 36500 -subj '/CN=*'
+    args:
+      creates: /etc/pki/tls/certs/dummy.pem
+    when:
+    - nginx_tls
+    - ansible_facts.os_family == 'RedHat'
+
+  - name: Write global Nginx config
+    template:
+      src: '{{ item.src }}'
+      dest: '{{ item.dest }}'
+    loop:
+    - { src: nginx.conf, dest: /etc/nginx/nginx.conf }
+    notify: Reload Nginx
+
+  - name: Write custom Nginx configs
+    template:
+      src: '{{ item.src }}'
+      dest: /etc/nginx/{{ item.dest }}
+    loop: '{{ nginx_extra_config_files | d([]) }}'
+    notify: Reload Nginx
+
+
+  - name: Start Nginx
+    systemd:
+      name: nginx
+      state: started
+      enabled: true
+    ignore_errors: '{{ ansible_check_mode }}'

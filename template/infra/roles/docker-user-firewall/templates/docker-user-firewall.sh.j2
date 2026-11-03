@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+iptables -N DOCKER-USER 2>/dev/null || true
+{% for port in docker_user_blocked_ports %}
+iptables -C DOCKER-USER -i {{ docker_user_external_interface }} -p tcp -m conntrack --ctorigdstport {{ port }} --ctdir ORIGINAL -j DROP 2>/dev/null \
+  || iptables -I DOCKER-USER -i {{ docker_user_external_interface }} -p tcp -m conntrack --ctorigdstport {{ port }} --ctdir ORIGINAL -j DROP
+{% endfor %}

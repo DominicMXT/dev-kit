@@ -1,0 +1,6 @@
+- name: Build image (on localhost)
+  hosts: {{ project_slug }}
+  gather_facts: false
+  connection: local
+  roles:
+  - docker-build

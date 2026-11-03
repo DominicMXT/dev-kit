@@ -37,6 +37,7 @@
   - `docker-compose.prod.yml` — prod: postgres{% if use_redis %} + redis{% endif %} + backend{% if use_worker %} + worker{% endif %} (`Dockerfile`)
   - `docker-compose.test.yml` — тесты: postgres_test{% if use_redis %} + redis_test{% endif %} + backend_test (`Dockerfile.test`)
 - `docs/` — ТЗ и материалы
+- `infra/` — Ansible: подготовка сервера и деплой стеком Docker Swarm, как пользоваться — `infra/README.md`
 - `start.sh` — сборка без кеша и запуск dev-стека
 - `run_tests.sh` — тесты в Docker с отчётом
 - `lint.sh` — линт и форматирование

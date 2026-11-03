@@ -1,0 +1,111 @@
+version: '3.9'
+
+x-app: &app
+  env_file:
+  - .env
+  hostname: '{% raw %}{{ .Service.Name }}{% endraw +%}'
+  healthcheck:
+    test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 3).close()"]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+    start_period: 20s
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    hostname: '{% raw %}{{ .Service.Name }}{% endraw +%}'
+    environment:
+      POSTGRES_USER: '{{ app_env_vars_dev.POSTGRES_USER }}'
+      POSTGRES_DB: '{{ app_env_vars_dev.POSTGRES_DB }}'
+      POSTGRES_PASSWORD: '{{ app_env_vault_dev.POSTGRES_PASSWORD }}'
+    volumes:
+    - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      restart_policy:
+        condition: any
+        delay: 5s
+
+{% if deploy_redis | d(false) %}
+  redis:
+    image: redis:7-alpine
+    hostname: '{% raw %}{{ .Service.Name }}{% endraw +%}'
+    command: redis-server --requirepass '{{ app_env_vault_dev.REDIS_PASSWORD }}' --appendonly yes --appendfsync everysec
+    volumes:
+    - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "{{ app_env_vault_dev.REDIS_PASSWORD }}", "--no-auth-warning", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      restart_policy:
+        condition: any
+        delay: 5s
+
+{% endif %}
+{% if deploy_migrations | d(true) %}
+  migrations:
+    image: '{{ swarm_registry_image_path }}-migrations:{{ env_name_short }}'
+    build:
+      context: '{{ app_src_dir }}/'
+      dockerfile: ../docker/Dockerfile.migrations
+      args:
+        BUILDKIT_INLINE_CACHE: '1'
+      cache_from:
+      - '{{ swarm_registry_image_path }}-migrations:{{ env_name_short }}'
+    env_file:
+    - .env
+    deploy:
+      restart_policy:
+        condition: none
+
+{% endif %}
+  backend:
+    <<: *app
+    image: '{{ swarm_registry_image_path }}-backend:{{ env_name_short }}'
+    build:
+      context: '{{ app_src_dir }}/'
+      dockerfile: ../docker/Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: '1'
+      cache_from:
+      - '{{ swarm_registry_image_path }}-backend:{{ env_name_short }}'
+    ports:
+    - '{{ compose_environment_port_prefix }}1:8000'
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+      update_config:
+        order: start-first
+        failure_action: rollback
+
+{% if deploy_worker | d(false) %}
+  worker:
+    image: '{{ swarm_registry_image_path }}-backend:{{ env_name_short }}'
+    hostname: '{% raw %}{{ .Service.Name }}{% endraw +%}'
+    command: ["taskiq", "worker", "app.tasks.broker:broker"]
+    env_file:
+    - .env
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+      update_config:
+        order: start-first
+        failure_action: rollback
+
+{% endif %}
+volumes:
+  postgres_data: {}
+{% if deploy_redis | d(false) %}
+  redis_data: {}
+{% endif %}

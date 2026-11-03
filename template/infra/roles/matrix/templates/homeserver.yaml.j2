@@ -1,0 +1,49 @@
+server_name: {{ matrix_server_name | to_json }}
+public_baseurl: {{ (matrix_url_scheme ~ '://' ~ matrix_domain ~ '/') | to_json }}
+web_client_location: {{ (matrix_url_scheme ~ '://' ~ matrix_element_domain ~ '/') | to_json }}
+pid_file: /data/homeserver.pid
+report_stats: false
+
+listeners:
+- port: 8008
+  type: http
+  tls: false
+  x_forwarded: true
+  bind_addresses: ['0.0.0.0']
+  resources:
+  - names: {{ (['client'] + (['federation'] if matrix_federation_enabled else [])) | to_json }}
+    compress: false
+
+database:
+  name: psycopg2
+  args:
+    user: {{ matrix_postgres_user | to_json }}
+    password: {{ matrix_postgres_password | to_json }}
+    dbname: {{ matrix_postgres_db | to_json }}
+    host: postgres
+    cp_min: 5
+    cp_max: 10
+
+log_config: /data/log.config
+media_store_path: /data/media_store
+signing_key_path: /data/signing.key
+max_upload_size: {{ matrix_max_upload_size }}
+
+registration_shared_secret: {{ matrix_registration_shared_secret | to_json }}
+macaroon_secret_key: {{ matrix_macaroon_secret_key | to_json }}
+form_secret: {{ matrix_form_secret | to_json }}
+
+enable_registration: {{ matrix_registration_enabled | bool | to_json }}
+{% if matrix_registration_enabled %}
+registration_requires_token: true
+{% endif %}
+
+{% if matrix_federation_enabled %}
+trusted_key_servers:
+- server_name: matrix.org
+suppress_key_server_warning: true
+{% else %}
+federation_domain_whitelist: []
+trusted_key_servers: []
+allow_public_rooms_over_federation: false
+{% endif %}

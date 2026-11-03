@@ -1,0 +1,23 @@
+- name: Create directory
+  file:
+    path: '{{ app_env_item.dest | dirname }}'
+    state: directory
+    mode: g+ws
+    group: '{{ deploy_group }}'
+  become: true
+
+- name: Calculate environment variables
+  vars:
+    src_var_name_prefix: '{{ app_env_item.src_var_name_prefix | d("app_env") }}'
+    app_env_int_vars:  '{{ lookup("community.general.merge_variables", src_var_name_prefix ~ "_vars",  pattern_type="prefix") }}'
+    app_env_int_vault: '{{ lookup("community.general.merge_variables", src_var_name_prefix ~ "_vault", pattern_type="prefix") }}'
+  set_fact:
+    app_env: '{{ [app_env_int_vars | combine(app_env_int_vault)] | community.general.keep_keys(app_env_int_vars | list) | first }}'
+
+- name: Write environment files (configs, .env file etc.)
+  template:
+    src: '{{ app_env_item.template_file | d(".env") }}'
+    dest: '{{ app_env_item.dest }}'
+    group: '{{ deploy_group }}'
+    mode: '0640'
+  diff: false

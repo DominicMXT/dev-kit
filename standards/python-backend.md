@@ -39,6 +39,7 @@ app/<feature>/
   lint.sh                              # ruff check + ruff format по backend/
   docker/                              # Dockerfile и compose-файлы: dev, prod, test
   docs/                                # ТЗ и материалы
+  infra/                               # Ansible: настройка сервера и деплой в Docker Swarm
   backend/
     app/
       main.py                          # Сборка приложения: lifespan, middleware, ответы на ошибки сервисов, роутеры
